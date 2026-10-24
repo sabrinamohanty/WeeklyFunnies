@@ -1,18 +1,22 @@
 # Meanwhile backend
 
-The API behind **Meanwhile**, an iOS app that turns a group of friends' weekly highlights into a shared
-newspaper with a comic strip. This repo is the backend only. The iOS app, the real AI model calls, and the
-visual design live elsewhere and plug in through the interfaces described below.
+The API behind **Meanwhile**, an iOS app that turns a group of friends' weekly highlights into a shared newspaper with a comic strip. This repo is the backend only. The iOS app, the real AI model calls, and the visual design live elsewhere and plug in through the interfaces described below.
 
-- **API contract for the app:** [`docs/api-contract.md`](docs/api-contract.md), plus the generated
-  [`docs/openapi.yaml`](docs/openapi.yaml) for model generation.
-- **Progress, decisions, and known gaps:** [`NOTES.md`](NOTES.md).
+- **API contract for the app:** `[docs/api-contract.md](docs/api-contract.md)`, plus the generated
+  `[docs/openapi.yaml](docs/openapi.yaml)` for model generation.
+- **Progress, decisions, and known gaps:** `[NOTES.md](NOTES.md)`.
 
 ## Status
 
-Phase 0 (scaffold and contract) is done. Every endpoint exists and answers in the standard response and
-error shapes. Endpoints not yet built return `501 not_implemented`. Until Phase 2 adds token verification,
-user endpoints return `401`. See `NOTES.md` for the phase plan.
+Phases 0 and 1 are done:
+
+- the scaffold and API contract;
+- the database schema, four private storage buckets, and row-level security and storage policies, with
+  two-user integration tests.
+
+Every endpoint exists and answers in the standard response and error shapes. Endpoints not yet built
+return `501 not_implemented`. Until Phase 2 adds token verification, user endpoints return `401`. See
+`NOTES.md` for the phase plan and database details.
 
 ## Stack
 
@@ -39,6 +43,15 @@ pnpm dev                        # http://localhost:3000
 curl localhost:3000/api/health  # {"data":{"status":"ok"}}
 ```
 
+## Checking the database locally
+
+After `pnpm db:start`:
+
+- **Supabase Studio** at <http://127.0.0.1:54323> shows tables, policies, and storage buckets.
+- **`pnpm test:integration`** creates throwaway users and data, proves what each user can and can't read
+  or write, and cleans up after itself.
+- **`pnpm db:reset`** rebuilds the local database from the migrations.
+
 ## Commands
 
 | Command                            | What it does                                                     |
@@ -63,7 +76,7 @@ src/lib/ai/         AiService, AiProvider, and Moderator interfaces; providers a
 src/lib/config/     Environment schema, validated at boot.
 src/lib/log/        Metadata-only structured logger.
 src/lib/ratelimit/  Rate limiter interface.
-supabase/           Local Supabase config; migrations arrive in Phase 1.
+supabase/           Local Supabase config and migrations (schema, row-level security, storage).
 tests/              unit/, ai/, integration/, and fixtures/ (shared text and upload cases).
 docs/               API contract and generated OpenAPI.
 ```
