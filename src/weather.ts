@@ -78,33 +78,48 @@ export async function locateCity(): Promise<string | null> {
   }
 }
 
-type Status = 'loading' | 'ready' | 'no_key' | 'error' | 'need_city'
+type Status = 'loading' | 'ready' | 'no_key' | 'error'
 
 /** Weather for the city the reader chose in their profile. */
+/** Used when the reader hasn't picked a city or their city's weather can't be loaded. */
+export const DEFAULT_CITY = 'Austin, TX'
+
+async function fetchForecast(city: string): Promise<{ forecast: Forecast } | { error: 'no_key' | 'error' }> {
+  const cached = read<{ at: number; forecast: Forecast }>(cacheKey(city))
+  if (cached && Date.now() - cached.at < 3_600_000) return { forecast: cached.forecast }
+  try {
+    const r = await fetch(`/api/weather?city=${encodeURIComponent(city)}`)
+    const body = await r.json()
+    if (!r.ok) return { error: body.error === 'no_key' ? 'no_key' : 'error' }
+    write(cacheKey(city), { at: Date.now(), forecast: body })
+    return { forecast: body }
+  } catch {
+    return { error: 'error' }
+  }
+}
+
+/**
+ * Weather for the city the reader chose in their profile. If there's no city, or its weather can't be
+ * loaded, it falls back to Austin. `city` in the result is the city the forecast is actually for.
+ */
 export function useCityWeather(city: string) {
   const [state, setState] = useState<{ status: Status; city: string; forecast: Forecast | null }>({ status: 'loading', city, forecast: null })
 
   useEffect(() => {
     let alive = true
-    const c = city.trim()
-    if (!c) { setState({ status: 'need_city', city: '', forecast: null }); return }
-    const cached = read<{ at: number; forecast: Forecast }>(cacheKey(c))
-    if (cached && Date.now() - cached.at < 3_600_000) {
-      setState({ status: 'ready', city: c, forecast: cached.forecast })
-      return
-    }
-    setState({ status: 'loading', city: c, forecast: null })
+    const wanted = city.trim() || DEFAULT_CITY
+    setState({ status: 'loading', city: wanted, forecast: null })
     ;(async () => {
-      try {
-        const r = await fetch(`/api/weather?city=${encodeURIComponent(c)}`)
-        const body = await r.json()
-        if (!alive) return
-        if (!r.ok) return setState({ status: body.error === 'no_key' ? 'no_key' : 'error', city: c, forecast: null })
-        write(cacheKey(c), { at: Date.now(), forecast: body })
-        setState({ status: 'ready', city: c, forecast: body })
-      } catch {
-        if (alive) setState({ status: 'error', city: c, forecast: null })
+      let used = wanted
+      let result = await fetchForecast(wanted)
+      if ('error' in result && wanted !== DEFAULT_CITY) {
+        used = DEFAULT_CITY
+        result = await fetchForecast(DEFAULT_CITY)
       }
+      if (!alive) return
+      setState('forecast' in result
+        ? { status: 'ready', city: used, forecast: result.forecast }
+        : { status: result.error, city: used, forecast: null })
     })()
     return () => { alive = false }
   }, [city])

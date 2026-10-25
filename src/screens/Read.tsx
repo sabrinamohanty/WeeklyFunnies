@@ -4,12 +4,13 @@ import { Cartoon } from '../components/Cartoon'
 import { SignBadge } from '../components/SignBadge'
 import { IconCake, IconCamera, IconChevron, SkyIcon } from '../components/Icons'
 import { Lightbox, type LightboxItem } from '../components/Lightbox'
-import { BRAND, Halftone, Logo, Screen, ThemeToggle, useCountdown } from '../components/ui'
+import { BRAND, Halftone, Logo, MiniMast, Screen, ThemeToggle, useCountdown } from '../components/ui'
 import { addDays, edition, friends, horoscopes, signFor, signReadings, stories, strips, swatchCycle, type Story } from '../data'
 import { useActivePaper, useStore } from '../store'
 import { sampleForecast, toWeek, useCityWeather } from '../weather'
 import { CityPicker } from '../components/CityPicker'
 import { LogOut } from './Papers'
+import { SettingsButton } from './Settings'
 
 /** Deterministic shuffle so story order is stable within an edition but changes between editions. */
 function seededShuffle<T>(arr: T[], seed: number) {
@@ -36,7 +37,7 @@ export function Front() {
   return (
     <Screen tabs>
       <header className="masthead">
-        <div className="meta-row"><span>Vol. {edition.vol} · No. {fresh ? 1 : edition.no}</span><ThemeToggle /></div>
+        <div className="meta-row"><span>Vol. {edition.vol} · No. {fresh ? 1 : edition.no}</span><span className="meta-actions"><ThemeToggle /><SettingsButton /></span></div>
         <h1 className="nameplate"><Logo size="lg" /></h1>
         <div className="double-rule" />
         <button className="dateline" onClick={() => nav('/papers')}>{edition.date} · {BRAND}</button>
@@ -118,44 +119,33 @@ function WeatherWeek() {
   }, [week.length])
 
   const status = wx.status === 'loading' ? 'Loading…'
-    : wx.status === 'no_key' ? 'Sample · add API key'
-    : wx.status === 'error' ? 'Sample · live weather unavailable'
-    : forecast?.current.temp != null ? `Now ${forecast.current.temp}° · ${forecast.current.sky}` : ''
+    : !sample && forecast?.current.temp != null ? `Now ${forecast.current.temp}° · ${forecast.current.sky}` : ''
 
   return (
     <section className="weather-week" aria-label={place ? `Weather this week in ${place}` : 'Weather this week'} aria-busy={!forecast}>
       <div className="weather-head">
         <span className="eyebrow">{place ? `${place} weather` : 'Your weather'}</span>
-        <span className={`weather-status ${sample ? 'warn' : ''}`}>{status}</span>
+        <span className="weather-status">{status}</span>
       </div>
 
-      {wx.status === 'need_city' ? (
-        <div className="wx-need">
-          <p>Pick your city to see your weather.</p>
-          <CityPicker id="wx-city" value="" onPick={pickCity} />
-        </div>
-      ) : (
-        <>
-          <div className="wx-source">
-            <span>{state.profile.city}</span>
-            <button className="link small" aria-expanded={changing} onClick={() => setChanging(c => !c)}>{changing ? 'Cancel' : 'Change'}</button>
-          </div>
-          {changing && <CityPicker id="wx-city" value="" autoFocus onPick={pickCity} />}
-          <div className="weather-scroll" ref={scroller} tabIndex={0} aria-label="Daily forecast, scroll sideways">
-            {forecast
-              ? week.map(d => (
-                <div key={d.key} className={`wx-day ${d.today ? 'today' : ''}`} title={d.text}>
-                  <span className="eyebrow">{d.today ? 'Today' : d.label}</span>
-                  <span className="wx-date">{d.label} {d.date}</span>
-                  <SkyIcon sky={d.sky} />
-                  <b>{d.high ?? '–'}<sup>°</sup></b>
-                  <span className="wx-low">{d.low ?? '–'}°</span>
-                </div>
-              ))
-              : Array.from({ length: 7 }, (_, i) => <div key={i} className="wx-day skeleton" />)}
-          </div>
-        </>
-      )}
+      <div className="wx-source">
+        <span>{wx.city}</span>
+        <button className="link small" aria-expanded={changing} onClick={() => setChanging(c => !c)}>{changing ? 'Cancel' : 'Change'}</button>
+      </div>
+      {changing && <CityPicker id="wx-city" value="" autoFocus onPick={pickCity} />}
+      <div className="weather-scroll" ref={scroller} tabIndex={0} aria-label="Daily forecast, scroll sideways">
+        {forecast
+          ? week.map(d => (
+            <div key={d.key} className={`wx-day ${d.today ? 'today' : ''}`} title={d.text}>
+              <span className="eyebrow">{d.today ? 'Today' : d.label}</span>
+              <span className="wx-date">{d.label} {d.date}</span>
+              <SkyIcon sky={d.sky} />
+              <b>{d.high ?? '–'}<sup>°</sup></b>
+              <span className="wx-low">{d.low ?? '–'}°</span>
+            </div>
+          ))
+          : Array.from({ length: 7 }, (_, i) => <div key={i} className="wx-day skeleton" />)}
+      </div>
     </section>
   )
 }
@@ -190,7 +180,7 @@ export function Comics() {
 
   return (
     <Screen tabs>
-      <header className="minimast rule-single solo"><Logo /></header>
+      <MiniMast rule="single" right={<SettingsButton />} />
       <h1 className="comic-title">Sunday Funnies</h1>
       <p className="note">Tap any panel to see the real photos</p>
       {strips.map((st, si) => {
@@ -229,7 +219,7 @@ export function Stars() {
 
   return (
     <Screen tabs>
-      <header className="minimast rule-single solo"><Logo /></header>
+      <MiniMast rule="single" right={<SettingsButton />} />
       <h1 className="display center">Stars &amp; Birthdays</h1>
       <p className="note">For entertainment only. Mostly.</p>
 

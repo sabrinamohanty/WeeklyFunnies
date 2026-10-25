@@ -10,7 +10,7 @@ const ORDER = [
   '/onboarding/profile', '/onboarding/avatar', '/onboarding/joined',
   '/front', '/comics', '/stars',
   '/my-week', '/my-week/write', '/my-week/review',
-  '/papers', '/papers/join', '/back-issues',
+  '/papers', '/papers/join', '/back-issues', '/settings',
 ]
 
 const rank = (path: string) => {
