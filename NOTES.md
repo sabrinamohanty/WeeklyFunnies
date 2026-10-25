@@ -7,8 +7,8 @@
 | 0. Scaffold and contract           | Done        |
 | 1. Database, storage, RLS          | Done        |
 | 2. Auth, papers, membership        | Done        |
-| 3. AI placeholder layer and safety | Next        |
-| 4. Core routes                     | Not started |
+| 3. AI placeholder layer and safety | Done        |
+| 4. Core routes                     | Next        |
 | 5. Weather, birthdays, horoscopes  | Not started |
 | 6. Retention                       | Not started |
 | 7. Seed data and docs              | Not started |
@@ -38,7 +38,10 @@ pnpm dev
 - `src/lib/http/`: the request pipeline (`defineRoute`), body limits, and the error envelope.
 - `src/proxy.ts`: JSON 404 and 405 for unknown paths and methods.
 - `src/lib/config/env.ts`: environment schema. It fails fast on boot and errors name keys, never values.
-- `src/lib/ai/types.ts`: `AiService`, `AiProvider`, and `Moderator` interfaces (implementations in Phase 3).
+- `src/lib/ai/`: `AiService` (`service.ts`), interfaces (`types.ts`), timeouts, concurrency and circuit
+  breaker (`resilience.ts`), and providers: `providers/stub/` (deterministic) and `providers/real/` (the
+  vendor plug-in point, not integrated yet).
+- `src/lib/safety/`: redaction, delimiters, prompt templates, output validation, grounding, fallbacks.
 - `src/lib/log/`: metadata-only JSON logger with key-based redaction.
 - `tests/fixtures/text-cases.ts`: shared text cases for every text route and the AI safety layer.
 - `supabase/migrations/`: schema (`…0100`), grants and row-level security (`…0200`), buckets and storage
@@ -47,6 +50,8 @@ pnpm dev
   (service role only).
 - `src/lib/db/`, `src/lib/papers/`, `src/lib/profile/`, `src/lib/geo/`: the service-key client, repos,
   invite codes, and the Open-Meteo geocoder.
+- `tests/ai/`: the full text-case suite through the writer and the name field, failure paths, and safety
+  unit tests. `live.test.ts` runs only with `AI_LIVE_TESTS=1`.
 - `tests/integration/`: two-user table tests, storage tests, database invariant tests, and API tests for
   `me`, papers, invites, and joining.
 
@@ -68,6 +73,22 @@ pnpm dev
   warning is logged (fail open).
 - **New env vars:** `INVITE_CODE_PEPPER` (required, at least 32 chars), `RATE_LIMIT_STORE`, and
   `RATE_LIMIT_ROUTE_SCALE` (tests only; config refuses anything but 1 in production).
+
+## AI layer (Phase 3)
+
+Routes only ever call `getAiService()` from `@/lib/ai`. A lint rule blocks vendor SDK imports anywhere
+except `src/lib/ai/providers/real/`, and blocks importing a provider directly from outside `src/lib/ai`.
+The full pipeline is described in `docs/api-contract.md` under "AI layer". In short:
+
+- User text is redacted (emails, links, phones), moderated, and sent only inside delimiters with a
+  random per-call id. System prompts are constants.
+- Output must match a strict schema, be plain text, respect `serious`, and pass a grounding check. One
+  retry, then a fallback built from the person's own words. Generated text is moderated too.
+- Image prompts come from fixed templates whose fields are reduced to letters and basic punctuation.
+  The selfie goes only to the avatar step; panels get the avatar.
+- Deadlines, a concurrency cap, circuit breakers, and per-user daily caps on every call. Moderation
+  failures fail closed. Logs carry metadata only.
+- `content_blocked` for self-harm uses a fixed supportive message and the `self_harm_support` issue.
 
 ## Database (Phase 1)
 
@@ -162,7 +183,21 @@ None right now.
 - **Slur test cases:** the fixture uses a marker token. Real examples for live moderation tests belong in
   an untracked, gated file.
 
+- **Stub moderation is keyword rules only.** It exists for tests and development; config refuses it in
+  production, so a real moderator must be integrated before launch.
+- **Real provider not integrated:** `AI_PROVIDER=real` selects a placeholder that fails every call
+  (`provider_unavailable`). The plug-in instructions are in `src/lib/ai/providers/real/provider.ts`.
+- **Grounding is a heuristic.** It catches invented capitalized names and numbers. Scripts without letter
+  case only get the number check, and invented lowercase facts aren't caught. The system prompt is the
+  main defence.
+- **Per-instance limits:** the concurrency cap and circuit breakers live in process memory, so each
+  serverless instance has its own. Phase 4's jobs table adds a global cap for panel jobs.
+- **AI daily caps fail open with the rate-limit store.** If Postgres is unreachable, caps aren't
+  enforced, but nothing else works either in that case.
+
 ## Endpoint shape changes
 
-Contract 0.2.0: `Member.name` is nullable, and invite creation is capped at 5 active invites
-(`409 conflict`). See the changelog in `docs/api-contract.md`.
+- 0.2.0: `Member.name` is nullable, and invite creation is capped at 5 active invites (`409 conflict`).
+- 0.3.0: `content_blocked` errors include `details`; the self-harm case has a fixed supportive message.
+
+See the changelog in `docs/api-contract.md`.

@@ -20,6 +20,15 @@ export const ERROR_CODES = {
 
 export type ErrorCode = keyof typeof ERROR_CODES;
 
+/** The only non-generic messages the API sends. Each pairs with a `details` issue of the same name. */
+export const SAFE_MESSAGES = {
+  self_harm_support:
+    "It sounds like you're going through something really hard. You don't have to face it alone. " +
+    "Please reach out to someone you trust, or a local crisis line.",
+} as const;
+
+export type SafeMessage = keyof typeof SAFE_MESSAGES;
+
 export const errorCodeSchema = z.enum(Object.keys(ERROR_CODES) as [ErrorCode, ...ErrorCode[]]);
 
 export const errorDetailSchema = z

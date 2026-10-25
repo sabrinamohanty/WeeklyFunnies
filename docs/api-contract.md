@@ -1,6 +1,6 @@
 # Meanwhile API contract
 
-Version 0.2.0 (Phase 2). This is the contract the iOS app builds against.
+Version 0.3.0 (Phase 3). This is the contract the iOS app builds against.
 
 - **Source of truth:** the Zod schemas in `src/lib/contract/`. `docs/openapi.yaml` is generated from them
   (`pnpm openapi`), and a test fails if it drifts. Use the OpenAPI file to generate Swift models.
@@ -215,8 +215,10 @@ returns `201 { event: OwnEvent }`:
 }
 ```
 
-- Blocked text returns `422 content_blocked` (nothing is saved). Self-harm or crisis content is blocked with
-  a supportive message. The app should show the message and supportive resources.
+- Blocked text returns `422 content_blocked` (nothing is saved), with
+  `details: [{ "path": "body.text", "issue": "content_blocked" }]`. Self-harm or crisis content is blocked
+  with a fixed supportive `message` and `details: [{ "path": "body.text", "issue": "self_harm_support" }]`.
+  The app should show the message and supportive resources when it sees `self_harm_support`.
 - If moderation flags a sensitive topic (loss, illness, breakup), `serious` is forced on, `inComic` defaults
   to false, and `notices` includes `marked_serious`. Serious events never get puns.
 - If generation fails validation twice, safe default text is used and `notices` includes `fallback_used`.
@@ -293,27 +295,36 @@ all devices.
 
 ## AI layer (server-side only, for reference)
 
-The app never calls AI directly. Routes call a vendor-neutral `AiService`. A thin `AiProvider` underneath
-is the only code that knows a vendor, selected by `AI_PROVIDER=stub|real`. Moderation is a separate
-`Moderator` (`MODERATION_PROVIDER=stub|real`). Definitions are in `src/lib/ai/types.ts`.
+The app never calls AI directly. Routes call a vendor-neutral `AiService` (`src/lib/ai`). A thin
+`AiProvider` underneath is the only code that knows a vendor, selected by `AI_PROVIDER=stub|real`.
+Moderation is a separate `Moderator` (`MODERATION_PROVIDER=stub|real`). Definitions are in
+`src/lib/ai/types.ts`.
 
 ```ts
 interface AiService {
   generateAvatar(
     i: { selfie: ImageBytes; tweaks?: AvatarTweaks; style: StyleConfig },
-    ctx,
+    ctx: AiCallContext,
   ): Promise<ImageBytes>;
   writeEvent(
     i: { text: string; serious: boolean; authorFirstName: string },
-    ctx,
-  ): Promise<{ headline; article; panel: PanelSpec; moderation: ModerationResult; usedFallback: boolean }>;
+    ctx: AiCallContext,
+  ): Promise<{
+    headline;
+    article;
+    panel: PanelSpec;
+    serious: boolean;
+    moderation: ModerationResult;
+    usedFallback: boolean;
+  }>;
   generatePanel(
     i: { avatar: ImageBytes; panel: PanelSpec; serious: boolean; style: StyleConfig },
-    ctx,
+    ctx: AiCallContext,
   ): Promise<ImageBytes>;
-  generateHoroscope(i: { sign: ZodiacSign; weekStart: string }, ctx): Promise<string>;
+  generateHoroscope(i: { sign: ZodiacSign; weekStart: string }, ctx: AiCallContext): Promise<string>;
 }
 
+type AiCallContext = { requestId: string; userId?: string /* caps only, never sent */; signal?: AbortSignal };
 type PanelSpec = {
   setting: string /* ≤80 */;
   action: string /* ≤120 */;
@@ -323,21 +334,60 @@ type PanelSpec = {
 
 interface AiProvider {
   completeJson(
-    req: { system; user; jsonSchema; maxOutputTokens },
-    ctx,
+    req: { task: "write_event" | "horoscope"; system; user; jsonSchema; maxOutputTokens },
+    ctx: CallContext,
   ): Promise<{ raw: unknown; meta: CallMeta }>;
   generateImage(
-    req: { prompt; reference: ImageBytes; style: StyleConfig; seed? },
-    ctx,
+    req: { task: "avatar" | "panel"; prompt; reference: ImageBytes; style: StyleConfig; seed? },
+    ctx: CallContext,
   ): Promise<{ image; meta: CallMeta }>;
 }
 
 interface Moderator {
-  checkText(text: string, ctx): Promise<{ decision: "allow" | "sensitive" | "block"; categories: string[] }>;
+  checkText(
+    text: string,
+    ctx: CallContext,
+  ): Promise<{ decision: "allow" | "sensitive" | "block"; categories: ModerationCategory[] }>;
 }
 ```
 
+`AiService` throws `AiError` with code `content_blocked`, `quota_exceeded`, `provider_unavailable`, or
+`generation_failed`. Routes convert it with `toApiError` (`generation_failed` becomes
+`provider_unavailable`); panel and avatar jobs store the code as the failure reason.
+
+What `writeEvent` does, in order:
+
+1. Cleans the text and redacts emails, links, and phone numbers. Only the redacted text goes to the
+   moderator and the model. The author's name is reduced to a letters-only first name.
+2. Moderates the input. `block` throws `content_blocked`; `sensitive` forces `serious`.
+3. Checks the per-user daily text cap.
+4. Calls the model with a fixed system prompt and the user content inside delimiters that carry a random
+   per-call id, so user text can't close the block.
+5. Validates the output: exact schema, length limits, plain text (no links or markup), a calm or
+   reflective mood when serious, and grounding (no capitalized names or numbers that aren't in the input,
+   except the author's first name). One retry on failure.
+6. Moderates the generated text and panel description.
+7. If validation fails twice or the output is blocked, returns the fallback: headline "{FirstName}'s
+   week", the person's own words with personal data and markup removed, and a neutral panel. Sets
+   `usedFallback`.
+
+Provider errors and timeouts aren't retried in the request; they throw `provider_unavailable`. Images are
+checked by their bytes (PNG, JPEG, or WebP matching the declared type, at most 10 MB), with one retry.
+Image prompts come from fixed templates; the panel description is moderated again before any image call.
+Horoscopes fall back to a fixed line per sign.
+
+Every call has a deadline (`AI_TIMEOUT_MS`), shares a concurrency cap (`AI_MAX_CONCURRENCY`), and runs
+behind a circuit breaker per operation (`AI_CIRCUIT_*`). Moderation failures fail closed. Calls are
+logged as metadata only: task, attempt, outcome, provider, model, latency, token counts, and rejection
+reason codes.
+
 ## Changelog
+
+- **0.3.0 (Phase 3):** the AI layer and safety checks are in place behind the stub provider.
+  - `content_blocked` errors now include `details` with issue `content_blocked` or `self_harm_support`.
+    The self-harm case uses a fixed supportive message instead of the generic one.
+  - `AiProvider` requests carry a `task` field; `AiService` takes an `AiCallContext` and `writeEvent`
+    also returns `serious`.
 
 - **0.2.0 (Phase 2):** auth, profile, papers and invites are live.
   - `Member.name` is nullable, for members who haven't finished onboarding.

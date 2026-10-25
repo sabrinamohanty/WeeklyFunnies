@@ -2,7 +2,7 @@
 openapi: 3.1.0
 info:
   title: Meanwhile API
-  version: 0.2.0
+  version: 0.3.0
   description: Backend API for the Meanwhile iOS app. Generated from src/lib/contract. See docs/api-contract.md.
 servers:
   - url: http://localhost:3000

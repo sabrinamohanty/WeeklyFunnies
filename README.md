@@ -8,13 +8,15 @@ The API behind **Meanwhile**, an iOS app that turns a group of friends' weekly h
 
 ## Status
 
-Phases 0 to 2 are done:
+Phases 0 to 3 are done:
 
 - the scaffold and API contract;
 - the database schema, four private storage buckets, and row-level security and storage policies, with
   two-user integration tests;
 - token verification, the profile (`/api/me`, `/api/geocode`), papers, members, invites and joining, with
   Postgres-backed rate limits.
+- the AI layer behind the stub provider: moderation, delimited prompts, output validation and grounding,
+  retries and fallbacks, caps, timeouts and a circuit breaker, tested against every shared text case.
 
 Every endpoint exists and answers in the standard response and error shapes. Endpoints not yet built
 return `501 not_implemented`. See `NOTES.md` for the phase plan, database and auth details.
@@ -73,7 +75,8 @@ src/proxy.ts        JSON 404 and 405 for unknown paths and methods.
 src/lib/contract/   Zod schemas and the route registry: the single source of truth.
 src/lib/http/       Request pipeline: auth, rate limits, validation, body limits, error envelope.
 src/lib/auth/       Token verification and the cron secret check.
-src/lib/ai/         AiService, AiProvider, and Moderator interfaces; providers arrive in Phase 3.
+src/lib/ai/         AiService, its interfaces, and the stub and real (placeholder) providers.
+src/lib/safety/     Redaction, delimiters, prompt templates, output validation, grounding, fallbacks.
 src/lib/config/     Environment schema, validated at boot.
 src/lib/log/        Metadata-only structured logger.
 src/lib/ratelimit/  Rate limiter interface.

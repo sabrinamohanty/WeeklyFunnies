@@ -1,12 +1,15 @@
 import type { z } from "zod";
-import { ERROR_CODES, type ErrorCode } from "@/lib/contract/errors";
+import { ERROR_CODES, SAFE_MESSAGES, type ErrorCode, type SafeMessage } from "@/lib/contract/errors";
 
 export interface ErrorDetail {
   path: string;
   issue: string;
 }
 
-/** An error that is safe to show the client. The message is always the generic one for the code. */
+/**
+ * An error that is safe to show the client. The message is the generic one for the code, or a fixed
+ * entry from SAFE_MESSAGES. It never contains caller-supplied text.
+ */
 export class ApiError extends Error {
   readonly code: ErrorCode;
   readonly status: number;
@@ -15,9 +18,14 @@ export class ApiError extends Error {
 
   constructor(
     code: ErrorCode,
-    opts: { details?: ErrorDetail[]; retryAfterSeconds?: number; cause?: unknown } = {},
+    opts: {
+      details?: ErrorDetail[];
+      retryAfterSeconds?: number;
+      message?: SafeMessage;
+      cause?: unknown;
+    } = {},
   ) {
-    super(ERROR_CODES[code].message, { cause: opts.cause });
+    super(opts.message ? SAFE_MESSAGES[opts.message] : ERROR_CODES[code].message, { cause: opts.cause });
     this.name = "ApiError";
     this.code = code;
     this.status = ERROR_CODES[code].status;
