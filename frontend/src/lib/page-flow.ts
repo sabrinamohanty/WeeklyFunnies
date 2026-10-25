@@ -187,6 +187,26 @@ export function draftStoriesForPaper<T>(
 
 export type FrontEmpty = 'join' | 'published-empty' | 'draft-empty' | null
 
+export function deadlineHasPassed(deadline: string, now = Date.now()): boolean {
+  const at = Date.parse(deadline)
+  return Number.isFinite(at) && at <= now
+}
+
+export function editionsReadyToPublish<T extends { status: string; deadline: string }>(
+  editions: T[],
+  now = Date.now(),
+): T[] {
+  return editions.filter(edition => edition.status === 'draft' && deadlineHasPassed(edition.deadline, now))
+}
+
+export function recycleNote(expiresAt: string | null, now = Date.now()): string {
+  if (!expiresAt) return 'Kept forever'
+  const left = Date.parse(expiresAt) - now
+  if (!Number.isFinite(left) || left <= 0) return 'Recycled soon'
+  const days = Math.ceil(left / 86_400_000)
+  return days <= 1 ? 'Recycled tomorrow' : `Recycled in ${days} days`
+}
+
 export function frontEmptyState(input: {
   paperCount: number
   published: boolean

@@ -9,7 +9,9 @@ import { Comics, Front, Stars } from './Read'
 
 const apiMock = vi.hoisted(() => ({
   currentEdition: vi.fn(),
+  listEditions: vi.fn(async () => ({ editions: [] })),
   editionBundle: vi.fn(),
+  publishEdition: vi.fn(),
   setReaction: vi.fn(),
   updateMe: vi.fn(),
   weather: vi.fn(),
@@ -119,6 +121,7 @@ describe('the edition', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     apiMock.weather.mockResolvedValue({ weather: austin })
+    apiMock.listEditions.mockResolvedValue({ editions: [] })
   })
 
   it('shows the reader’s own draft, and the live forecast', async () => {
@@ -129,6 +132,22 @@ describe('the edition', () => {
     expect(apiMock.weather).toHaveBeenCalledWith(undefined)
     expect(screen.queryByText(/Sample/)).toBeNull()
     expect(screen.queryByRole('heading', { name: 'Public hed' })).toBeNull()
+  })
+
+  it('lets the editor publish a closed week from the front page', async () => {
+    const past = {
+      ...bundle().edition,
+      id: 'past-edition',
+      issueNumber: 3,
+      weekStart: '2026-10-12',
+      deadline: '2020-01-01T00:00:00.000Z',
+      status: 'draft' as const,
+    }
+    apiMock.listEditions.mockResolvedValue({ editions: [past] })
+    apiMock.publishEdition.mockResolvedValue({ edition: { ...past, status: 'published' } })
+    show('/front', bundle())
+    fireEvent.click(await screen.findByRole('button', { name: 'Publish the week of Oct 12–18' }))
+    await waitFor(() => expect(apiMock.publishEdition).toHaveBeenCalledWith('past-edition'))
   })
 
   it('does not also show that draft once the edition is on the stands', async () => {

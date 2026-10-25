@@ -116,6 +116,14 @@ The cleanup tests set a profile's timezone to UTC on its own, and they inserted 
 
 `tests/integration/api-retention.test.ts` covers both outcomes. An idle author's saved edition and its page stay, and that author's other draft is deleted. An expired edition is deleted, and so is the past page that was its only copy. The same file checks logout, signing back in, the 24-hour grace, the 30-day window, selfie expiry, the storage outbox, and rate-limit pruning.
 
+### The paper could not be published, saved, or left during signup
+
+An end-to-end pass of the live app (password sign-in, profile, paper, highlights, stub comic, member join, weather, horoscopes, logout) found four gaps. Approving a page said the editor publishes after Sunday at 11:59 p.m., but nothing in the app called `POST /api/editions/{id}/publish`. Back issues rendered three sample headlines from `frontend/src/data.ts` ("Austin Man Adopts First Pup" and the rest), and Save only flipped issue numbers in `localStorage`. Reactions already rendered on a published front page, but they stayed unreachable because no edition could be published. Log out existed on the front page and the newsstand, and not on the profile, avatar, or "you're on the staff" steps, so a half-finished signup had no way out.
+
+The current week's edition is never past its deadline while it is still the current edition. The deadline is Sunday 11:59 p.m. in the editor's timezone, and the next instant is Monday, which opens a new draft. Publishing has to target the previous week's still-draft edition, from the front page and from back issues, once `edition.deadline` is in the past. Members see "Waiting for the editor" and no Save button. Save calls `PUT /api/editions/{id}/saved` and only appears for the editor on a published edition. Read loads that edition's bundle, including Ha, Aww, and Hooray. A conflict toast explains that the deadline has not passed or a panel is still inking. Log out is on all three onboarding screens and still signs out on the server before clearing the browser session.
+
+`frontend/src/lib/page-flow.test.ts` checks which drafts are ready for press and how the recycle note counts days. `frontend/src/screens/read.test.tsx` clicks "Publish the week of Oct 12–18". `frontend/src/screens/back-issues.test.tsx` checks that the sample headlines are gone, that an editor can publish and save, and that a contributor can open the printed story and its reactions.
+
 ## Contract notes for the frontend
 
 - **Contract 0.5.0:** each person writes one page per week under `/api/pages/*`, posted to the papers

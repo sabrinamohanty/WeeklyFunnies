@@ -234,17 +234,5 @@ export interface Paper {
 }
 
 
-export interface Issue { no: number; week: string; headline: string; swatch: Swatch; recycleIn: number }
-
-export const issues: Issue[] = [
-  { no: 43, week: 'Oct 19–25', headline: 'Austin Man Adopts First Pup!', swatch: 'yellow', recycleIn: 14 },
-  { no: 42, week: 'Oct 12–18', headline: 'Priya Declares War on Orgo', swatch: 'blue', recycleIn: 6 },
-  { no: 41, week: 'Oct 5–11', headline: 'Crew Survives ACL, Barely', swatch: 'pink', recycleIn: 1 },
-]
-
-export const savedIssues: Issue[] = [
-  { no: 36, week: 'Aug 31–Sep 6', headline: 'Diego Learns to Two-Step, Sort Of', swatch: 'green', recycleIn: Infinity },
-]
-
 export const swatchCycle: Swatch[] = ['blue', 'yellow', 'purple', 'green', 'pink']
 export const moodCycle: Mood[] = ['o', 'grin', 'smile', 'flat']

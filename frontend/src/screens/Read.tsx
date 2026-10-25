@@ -1,23 +1,20 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { Cartoon } from '../components/Cartoon'
+import { PublishedStoryCard } from '../components/EditionStories'
 import { SignBadge } from '../components/SignBadge'
 import { IconCake, IconCamera, IconChevron, SkyIcon } from '../components/Icons'
 import { Lightbox, type LightboxItem } from '../components/Lightbox'
 import { BRAND, Halftone, Logo, Screen, ThemeToggle, useCountdown } from '../components/ui'
 import { edition, dayOfMonth, monthDayLabel, signFor, signReadings, swatchCycle, weekLabelFromIso, zodiac } from '../data'
 import { api, userMessage } from '../lib/api'
-import { draftStoriesForPaper, frontEmptyState, lightboxItems, showOwnDraftComic, toggledReaction } from '../lib/page-flow'
-import type { EditionBundle, PublishedPage, PublishedStory, ReactionKind } from '../lib/types'
+import { draftStoriesForPaper, editionsReadyToPublish, frontEmptyState, lightboxItems, showOwnDraftComic } from '../lib/page-flow'
+import { ApiError, type EditionBundle, type EditionSummary, type PublishedPage } from '../lib/types'
 import { useActivePaper, useEditionBundle, useStore } from '../store'
 import { browserCoords, fromWeather, toWeek, type Forecast } from '../weather'
 import { CityPicker } from '../components/CityPicker'
 import { lookFor } from './Onboarding'
 import { LogOut } from './Papers'
-
-function sectionLabel(section: string) {
-  return section ? section[0]!.toUpperCase() + section.slice(1) : 'News'
-}
 
 function memberOf(bundle: EditionBundle, userId: string) {
   return bundle.members.find(m => m.userId === userId) ?? null
@@ -53,6 +50,8 @@ export function Front() {
       </header>
 
       <WeatherWeek />
+
+      {paper && bundle?.viewer.role === 'owner' && <PressControl paperId={paper.id} />}
 
       {published && pages.flatMap(page => page.stories.map(story => (
         <PublishedStoryCard key={story.id} bundle={bundle!} page={page} story={story} />
@@ -107,46 +106,48 @@ export function Front() {
   )
 }
 
-function PublishedStoryCard({ bundle, page, story }: { bundle: EditionBundle; page: PublishedPage; story: PublishedStory }) {
-  const author = memberOf(bundle, page.authorId)
-  return (
-    <article className="story">
-      <p className="kicker">{sectionLabel(story.section)}</p>
-      <h2 className="headline">{story.headline}</h2>
-      <p className="byline">By {author?.name || 'Staff'}</p>
-      <p className="story-body">{story.body}</p>
-      <StoryReactions editionId={bundle.edition.id} story={story} />
-    </article>
-  )
-}
+function PressControl({ paperId }: { paperId: string }) {
+  const { loadBundle, toast } = useStore()
+  const [waiting, setWaiting] = useState<EditionSummary[]>([])
+  const [busy, setBusy] = useState(false)
 
-function StoryReactions({ editionId, story }: { editionId: string; story: PublishedStory }) {
-  const { set, toast } = useStore()
-  const react = async (kind: ReactionKind) => {
+  useEffect(() => {
+    let alive = true
+    api.listEditions(paperId).then(({ editions }) => {
+      if (alive) setWaiting(editionsReadyToPublish(editions))
+    }).catch(() => {})
+    return () => { alive = false }
+  }, [paperId])
+
+  if (waiting.length === 0) return null
+
+  const publish = async (edition: EditionSummary) => {
+    setBusy(true)
     try {
-      const next = toggledReaction(story.myReaction, kind)
-      const { reactions, myReaction } = await api.setReaction(editionId, story.id, next)
-      set(s => ({
-        bundle: s.bundle ? {
-          ...s.bundle,
-          pages: s.bundle.pages.map(p => ({
-            ...p,
-            stories: p.stories.map(st => st.id === story.id ? { ...st, reactions, myReaction } : st),
-          })),
-        } : s.bundle,
-      }))
+      await api.publishEdition(edition.id)
+      toast(`No. ${edition.issueNumber} is on the stands`)
+      setWaiting(rows => rows.filter(row => row.id !== edition.id))
+      await loadBundle(paperId)
     } catch (e) {
-      toast(userMessage(e))
+      toast(e instanceof ApiError && e.code === 'conflict'
+        ? 'That edition is not ready to print. The Sunday deadline has to pass, and every panel has to finish inking.'
+        : userMessage(e))
+    } finally {
+      setBusy(false)
     }
   }
+
   return (
-    <div className="reactions">
-      {(['ha', 'aww', 'hooray'] as const).map(k => (
-        <button key={k} type="button" className={`reaction ${story.myReaction === k ? 'on' : ''}`} onClick={() => void react(k)}>
-          {k === 'ha' ? 'Ha' : k === 'aww' ? 'Aww' : 'Hooray'}<span>{story.reactions[k]}</span>
+    <section className="empty-edition">
+      <p className="kicker">Editor</p>
+      <h2 className="headline">A closed week is ready for press</h2>
+      <p className="story-body">The Sunday deadline has passed. Publishing puts every approved page on the stands. This week's paper stays open until next Sunday at 11:59 p.m.</p>
+      {waiting.map(edition => (
+        <button key={edition.id} className="btn btn-primary" disabled={busy} onClick={() => void publish(edition)}>
+          {busy ? 'Printing…' : `Publish the week of ${weekLabelFromIso(edition.weekStart)}`}
         </button>
       ))}
-    </div>
+    </section>
   )
 }
 

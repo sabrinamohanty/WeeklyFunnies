@@ -9,6 +9,7 @@ import { api, userMessage } from '../lib/api'
 import { avatarNeedsRedraw, avatarPhotoProblem, avatarTraits } from '../lib/page-flow'
 import { useStore, type ArtStyle, type State } from '../store'
 import { CityPicker } from '../components/CityPicker'
+import { LogOut } from './Papers'
 
 export function Profile() {
   const nav = useNavigate()
@@ -66,6 +67,7 @@ export function Profile() {
         )}
         {err && <p className="error">{err}</p>}
       </div>
+      <LogOut />
     </Screen>
   )
 }
@@ -227,6 +229,7 @@ export function AvatarStep() {
         </button>
       </div>
       <p className="hint">We delete your selfie as soon as you approve your avatar.</p>
+      <LogOut />
     </Screen>
   )
 }
@@ -270,6 +273,7 @@ export function Joined() {
           </li>
         </ul>
       </section>
+      <LogOut />
     </Screen>
   )
 }

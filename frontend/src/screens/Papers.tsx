@@ -1,9 +1,12 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { PublishedStoryCard, withStoryReaction } from '../components/EditionStories'
 import { IconBookmark, IconChevron, IconClock, IconPlus, IconX } from '../components/Icons'
-import { BRAND, Cover, Dots, Halftone, Logo, MiniMast, Overlay, Screen, initials } from '../components/ui'
-import { edition, issues, savedIssues, type Issue } from '../data'
+import { BRAND, Cover, Dots, MiniMast, Overlay, Screen, initials } from '../components/ui'
+import { weekLabelFromIso } from '../data'
 import { api, userMessage } from '../lib/api'
+import { editionsReadyToPublish, recycleNote } from '../lib/page-flow'
+import { ApiError, type EditionBundle, type EditionSummary } from '../lib/types'
 import { toUiPaper, useActivePaper, useStore } from '../store'
 
 const statusTag = { due: 'Due Sun', new: 'New', done: 'Done' } as const
@@ -162,17 +165,71 @@ export function JoinPaper() {
 export function BackIssues() {
   const { state, set, toast } = useStore()
   const paper = useActivePaper()
-  const [reading, setReading] = useState<Issue | null>(null)
-  const all = [...issues, ...savedIssues]
-  const saved = all.filter(i => state.saved.includes(i.no))
+  const [editions, setEditions] = useState<EditionSummary[]>([])
+  const [status, setStatus] = useState(paper ? 'Loading past editions…' : '')
+  const [busyId, setBusyId] = useState<string | null>(null)
+  const [reading, setReading] = useState<EditionBundle | null>(null)
+  const owner = paper?.role === 'Editor'
+  const press = editionsReadyToPublish(editions)
+  const onStands = editions.filter(edition => edition.status === 'published' && !edition.savedAt)
+  const kept = editions.filter(edition => edition.status === 'published' && Boolean(edition.savedAt))
+  const empty = !status && press.length === 0 && onStands.length === 0 && kept.length === 0
 
-  const toggleSave = (no: number) => {
-    const on = state.saved.includes(no)
-    set(s => ({ saved: on ? s.saved.filter(n => n !== no) : [...s.saved, no] }))
-    toast(on ? `No. ${no} will be recycled on schedule` : `No. ${no} saved forever`)
+  const paperId = paper?.id
+  useEffect(() => {
+    if (!paperId) return
+    let alive = true
+    setEditions([])
+    setStatus('Loading past editions…')
+    api.listEditions(paperId).then(({ editions: rows }) => {
+      if (!alive) return
+      setEditions(rows)
+      setStatus('')
+    }).catch(e => {
+      if (alive) setStatus(userMessage(e))
+    })
+    return () => { alive = false }
+  }, [paperId])
+
+  const publish = async (edition: EditionSummary) => {
+    setBusyId(edition.id)
+    try {
+      const { edition: printed } = await api.publishEdition(edition.id)
+      setEditions(rows => rows.map(row => row.id === printed.id ? printed : row))
+      toast(`No. ${printed.issueNumber} is on the stands`)
+    } catch (e) {
+      toast(e instanceof ApiError && e.code === 'conflict'
+        ? 'That edition is not ready to print. The Sunday deadline has to pass, and every panel has to finish inking.'
+        : userMessage(e))
+    } finally {
+      setBusyId(null)
+    }
   }
 
-  const recycleLabel = (i: Issue) => (i.no === edition.no ? 'This week’s edition' : i.recycleIn === 1 ? 'Recycled tomorrow' : `Recycled in ${i.recycleIn} days`)
+  const toggleSave = async (edition: EditionSummary) => {
+    const next = !edition.savedAt
+    setBusyId(edition.id)
+    try {
+      const { edition: saved } = await api.saveEdition(edition.id, next)
+      setEditions(rows => rows.map(row => row.id === saved.id ? saved : row))
+      toast(next ? `No. ${saved.issueNumber} saved forever` : `No. ${saved.issueNumber} will be recycled on schedule`)
+    } catch (e) {
+      toast(userMessage(e))
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  const openEdition = async (edition: EditionSummary) => {
+    setBusyId(edition.id)
+    try {
+      setReading((await api.editionBundle(edition.id)).bundle)
+    } catch (e) {
+      toast(userMessage(e))
+    } finally {
+      setBusyId(null)
+    }
+  }
 
   return (
     <Screen>
@@ -185,36 +242,82 @@ export function BackIssues() {
       </select>
       <div className="deadline">
         <IconClock size={22} />
-        <p>Editions stay for <b>2 weeks</b>, then they're recycled. Tap <b>Save</b> to keep one forever.</p>
+        <p>Published editions stay for <b>14 days</b>, then they're recycled. The editor can tap <b>Save</b> to keep one forever.</p>
       </div>
 
-      <h2 className="section-label">Last two weeks</h2>
-      <div className="issue-list">
-        {issues.map(i => (
-          <IssueCard key={i.no} issue={i} paperName={paper?.name ?? BRAND} note={recycleLabel(i)} urgent={i.no !== edition.no}
-            saved={state.saved.includes(i.no)} canSave={i.no !== edition.no} onRead={() => setReading(i)} onSave={() => toggleSave(i.no)} />
-        ))}
-      </div>
+      {!paper && <p className="hint">Join a paper to see its editions.</p>}
+      {status && <p className="hint">{status}</p>}
+      {empty && <p className="hint">No past editions yet. This week's paper is still open, and it prints after Sunday at 11:59 p.m.</p>}
 
-      <h2 className="section-label">Saved · kept forever</h2>
-      <div className="issue-list">
-        {saved.length === 0 && <p className="hint">Nothing saved yet.</p>}
-        {saved.map(i => (
-          <IssueCard key={i.no} issue={i} paperName={paper?.name ?? BRAND} note="Kept forever" saved canSave onRead={() => setReading(i)} onSave={() => toggleSave(i.no)} />
-        ))}
-      </div>
+      {press.length > 0 && (
+        <>
+          <h2 className="section-label">Ready for press</h2>
+          <div className="issue-list">
+            {press.map(edition => (
+              <EditionCard key={edition.id} edition={edition} paperName={paper?.name ?? BRAND}
+                note="The Sunday deadline has passed"
+                action={owner ? (
+                  <button className="btn btn-sm btn-primary" disabled={busyId === edition.id} onClick={() => void publish(edition)}>
+                    {busyId === edition.id ? 'Printing…' : 'Publish'}
+                  </button>
+                ) : <span className="hint">Waiting for the editor</span>}
+              />
+            ))}
+          </div>
+        </>
+      )}
+
+      {onStands.length > 0 && (
+        <>
+          <h2 className="section-label">On the stands</h2>
+          <div className="issue-list">
+            {onStands.map(edition => (
+              <EditionCard key={edition.id} edition={edition} paperName={paper?.name ?? BRAND}
+                note={recycleNote(edition.expiresAt)} urgent
+                onRead={() => void openEdition(edition)}
+                save={owner ? { saved: false, busy: busyId === edition.id, onSave: () => void toggleSave(edition) } : undefined}
+              />
+            ))}
+          </div>
+        </>
+      )}
+
+      {kept.length > 0 && (
+        <>
+          <h2 className="section-label">Saved · kept forever</h2>
+          <div className="issue-list">
+            {kept.map(edition => (
+              <EditionCard key={edition.id} edition={edition} paperName={paper?.name ?? BRAND} note="Kept forever"
+                onRead={() => void openEdition(edition)}
+                save={owner ? { saved: true, busy: busyId === edition.id, onSave: () => void toggleSave(edition) } : undefined}
+              />
+            ))}
+          </div>
+        </>
+      )}
 
       {reading && (
         <Overlay>
-          <div className="press-overlay" role="dialog" aria-modal="true" aria-label={`Issue ${reading.no}`} onClick={() => setReading(null)}>
+          <div className="press-overlay" role="dialog" aria-modal="true" aria-label={`Issue ${reading.edition.issueNumber}`} onClick={() => setReading(null)}>
             <article className="reader pop" onClick={e => e.stopPropagation()}>
               <button className="icon-btn reader-close" aria-label="Close" onClick={() => setReading(null)}><IconX /></button>
-              <div className="meta-row"><span>No. {reading.no}</span><span>{reading.week}</span></div>
-              <Logo size="md" />
+              <div className="meta-row">
+                <span>No. {reading.edition.issueNumber}</span>
+                <span>{weekLabelFromIso(reading.edition.weekStart)}</span>
+              </div>
               <div className="double-rule" />
-              <h2 className="headline">{reading.headline}</h2>
-              <Halftone swatch={reading.swatch} className="reader-photo"><span className="photo-tag">[Front page photo]</span></Halftone>
-              <p className="story-body">The full archive reader is coming soon. For now, here's the front page as it ran.</p>
+              {reading.pages.length === 0 && <p className="hint">No approved pages made it into this edition.</p>}
+              {reading.pages.flatMap(page => page.stories.map(story => (
+                <PublishedStoryCard key={story.id} bundle={reading} page={page} story={story}
+                  onReaction={(storyId, reactions, myReaction) => {
+                    setReading(current => current ? withStoryReaction(current, storyId, reactions, myReaction) : current)
+                    set(s => ({
+                      bundle: s.bundle && s.bundle.edition.id === reading.edition.id
+                        ? withStoryReaction(s.bundle, storyId, reactions, myReaction)
+                        : s.bundle,
+                    }))
+                  }} />
+              )))}
             </article>
           </div>
         </Overlay>
@@ -223,22 +326,38 @@ export function BackIssues() {
   )
 }
 
-function IssueCard({ issue, paperName, note, urgent, saved, canSave, onRead, onSave }: { issue: Issue; paperName: string; note: string; urgent?: boolean; saved: boolean; canSave: boolean; onRead: () => void; onSave: () => void }) {
+function EditionCard({
+  edition,
+  paperName,
+  note,
+  urgent,
+  action,
+  onRead,
+  save,
+}: {
+  edition: EditionSummary
+  paperName: string
+  note: string
+  urgent?: boolean
+  action?: ReactNode
+  onRead?: () => void
+  save?: { saved: boolean; busy: boolean; onSave: () => void }
+}) {
   return (
     <article className="card issue">
       <div className="issue-cover">
         <span className="issue-logo">{paperName}</span>
-        <Halftone swatch={issue.swatch} className="issue-art" />
       </div>
       <div>
-        <p className="eyebrow">No. {issue.no} · {issue.week}</p>
-        <h3>{issue.headline}</h3>
-        <p className={`issue-note ${urgent && !saved ? 'urgent' : ''}`}>{saved && issue.recycleIn !== Infinity ? 'Saved forever' : note}</p>
+        <p className="eyebrow">No. {edition.issueNumber} · {weekLabelFromIso(edition.weekStart)}</p>
+        <h3>{edition.status === 'published' ? 'On the stands' : 'Waiting for press'}</h3>
+        <p className={`issue-note ${urgent && !save?.saved ? 'urgent' : ''}`}>{note}</p>
         <div className="btn-row">
-          <button className="btn btn-sm btn-primary" onClick={onRead}>Read</button>
-          {canSave && (
-            <button className={`btn btn-sm ${saved ? 'saved' : ''}`} aria-pressed={saved} onClick={onSave}>
-              <IconBookmark size={18} fill={saved ? 'currentColor' : 'none'} /> {saved ? 'Saved' : 'Save'}
+          {onRead && <button className="btn btn-sm btn-primary" onClick={onRead}>Read</button>}
+          {action}
+          {save && (
+            <button className={`btn btn-sm ${save.saved ? 'saved' : ''}`} aria-pressed={save.saved} disabled={save.busy} onClick={save.onSave}>
+              <IconBookmark size={18} fill={save.saved ? 'currentColor' : 'none'} /> {save.saved ? 'Saved' : 'Save'}
             </button>
           )}
         </div>

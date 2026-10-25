@@ -7,13 +7,16 @@ import {
   avatarPhotoProblem,
   avatarTraits,
   classifyHighlightPhotos,
+  deadlineHasPassed,
   draftStoriesForPaper,
+  editionsReadyToPublish,
   drawComicPanels,
   frontEmptyState,
   lightboxItems,
   moveItem,
   parseLocalDraft,
   reconcileHighlights,
+  recycleNote,
   shouldRegenerate,
   showOwnDraftComic,
   storyEdit,
@@ -233,6 +236,25 @@ describe('reading and avatar decisions', () => {
     expect(draftStoriesForPaper(false, 'other', [{ paperId: 'paper' }], stories)).toEqual([])
     expect(draftStoriesForPaper(true, 'paper', [{ paperId: 'paper' }], stories)).toEqual([])
     expect(draftStoriesForPaper(false, undefined, [{ paperId: 'paper' }], stories)).toEqual([])
+  })
+
+  it('offers press only for a draft whose Sunday deadline has passed', () => {
+    const now = Date.parse('2026-10-26T12:00:00.000Z')
+    const open = { id: 'open', status: 'draft', deadline: '2026-11-02T04:59:59.999Z' }
+    const closed = { id: 'closed', status: 'draft', deadline: '2026-10-26T04:59:59.999Z' }
+    const printed = { id: 'printed', status: 'published', deadline: '2026-10-26T04:59:59.999Z' }
+    expect(deadlineHasPassed(closed.deadline, now)).toBe(true)
+    expect(deadlineHasPassed(open.deadline, now)).toBe(false)
+    expect(deadlineHasPassed('not-a-date', now)).toBe(false)
+    expect(editionsReadyToPublish([open, closed, printed], now)).toEqual([closed])
+  })
+
+  it('counts days until an unsaved edition is recycled', () => {
+    const now = Date.parse('2026-10-26T12:00:00.000Z')
+    expect(recycleNote(null, now)).toBe('Kept forever')
+    expect(recycleNote('2026-10-26T13:00:00.000Z', now)).toBe('Recycled tomorrow')
+    expect(recycleNote('2026-10-28T12:00:00.000Z', now)).toBe('Recycled in 2 days')
+    expect(recycleNote('2026-10-26T11:00:00.000Z', now)).toBe('Recycled soon')
   })
 
   it('picks one empty state and does not stack them', () => {

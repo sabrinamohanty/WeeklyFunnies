@@ -132,8 +132,17 @@ export const api = {
 
   currentEdition: (paperId: string) =>
     request<{ edition: EditionSummary }>(`/api/papers/${paperId}/editions/current`),
+  listEditions: (paperId: string) =>
+    request<{ editions: EditionSummary[] }>(`/api/papers/${paperId}/editions`),
   editionBundle: (editionId: string) =>
     request<{ bundle: EditionBundle }>(`/api/editions/${editionId}`),
+  publishEdition: (editionId: string) =>
+    request<{ edition: EditionSummary }>(`/api/editions/${editionId}/publish`, { method: 'POST', body: '{}' }),
+  saveEdition: (editionId: string, saved: boolean) =>
+    request<{ edition: EditionSummary }>(`/api/editions/${editionId}/saved`, {
+      method: 'PUT',
+      body: JSON.stringify({ saved }),
+    }),
   setReaction: (editionId: string, storyId: string, reaction: ReactionKind | null) =>
     request<{ reactions: ReactionCounts; myReaction: ReactionKind | null }>(
       `/api/editions/${editionId}/stories/${storyId}/reaction`,
