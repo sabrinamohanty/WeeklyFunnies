@@ -75,4 +75,13 @@ function weatherApi(env: Record<string, string>): Plugin {
 
 export default defineConfig(({ mode }) => ({
   plugins: [react(), weatherApi(loadEnv(mode, process.cwd(), ''))],
+  // Avatar, story and comic generation run in server/ (npm run server); the key never reaches the browser.
+  server: {
+    proxy: {
+      '/api/avatar': 'http://localhost:8787',
+      '/api/story': 'http://localhost:8787',
+      '/api/panel': 'http://localhost:8787',
+      '/generated': 'http://localhost:8787',
+    },
+  },
 }))

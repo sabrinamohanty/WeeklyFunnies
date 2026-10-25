@@ -12,13 +12,17 @@ export interface Highlight {
 }
 
 export interface DraftStory { highlightId: string; headline: string; article: string; alt: number }
-export interface DraftPanel { id: string; swatch: Swatch; mood: Mood; caption: string }
+export interface DraftPanel {
+  id: string; swatch: Swatch; mood: Mood; caption: string
+  /** Set when the comic was drawn by the image model: the picture, and the script it came from. */
+  image?: string; scene?: string; characters?: string[]; loading?: boolean
+}
 
 export interface State {
   authed: boolean
   email: string
   profile: { name: string; city: string; birthday: string }
-  avatar: { style: ArtStyle; hair: number; glasses: boolean; outfit: number }
+  avatar: { style: ArtStyle; hair: number; glasses: boolean; outfit: number; /** Drawn avatar, as a server image path. */ image?: string }
   theme: 'light' | 'dark' | null
   papers: Paper[]
   /** The paper being read; its name heads every in-paper screen. */

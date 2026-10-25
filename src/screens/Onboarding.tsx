@@ -8,6 +8,7 @@ import { friends, signFor, type Look } from '../data'
 import { useStore, type ArtStyle, type State } from '../store'
 import { CityPicker } from '../components/CityPicker'
 import { locateCity } from '../weather'
+import { apiStyle, generateAvatar, imageSrc, photoToDataUrl } from '../api'
 
 export function Profile() {
   const nav = useNavigate()
@@ -80,6 +81,21 @@ export function lookFor(avatar: State['avatar']): Look {
   return { skin: '#C98A5E', hair: hairs[avatar.hair]!, shirt: outfits[avatar.outfit]!, glasses: avatar.glasses }
 }
 
+const hairNames = ['black hair', 'auburn brown hair', 'blonde hair', 'bright red hair', 'dark brown hair']
+const outfitNames = ['orange', 'blue', 'green', 'purple', 'pink']
+
+/** The fixed look text the image model gets for every drawing of this person. */
+export function describeLook(avatar: State['avatar']) {
+  return `warm tan skin, ${hairNames[avatar.hair]}, ${avatar.glasses ? 'round glasses, ' : ''}${outfitNames[avatar.outfit]} t-shirt`
+}
+
+/** An avatar face: the drawn picture when there is one, otherwise the built-in cartoon. */
+export function AvatarFace({ avatar, crop, mood }: { avatar: State['avatar']; crop?: 'full' | 'face'; mood?: 'smile' | 'grin' }) {
+  return avatar.image
+    ? <img src={imageSrc(avatar.image)} alt="Your cartoon avatar" />
+    : <Cartoon look={lookFor(avatar)} style={avatar.style} crop={crop} mood={mood} />
+}
+
 export function AvatarStep() {
   const nav = useNavigate()
   const { state, set, toast } = useStore()
@@ -87,21 +103,33 @@ export function AvatarStep() {
   const fromSettings = (useLocation().state as { from?: string } | null)?.from === 'settings'
   const [a, setA] = useState(state.avatar)
   const [selfie, setSelfie] = useState<string | null>(null)
+  // The shrunken selfie sent to the artist. Kept in memory only, never saved.
+  const photoData = useRef<string | undefined>()
   const [drawing, setDrawing] = useState(false)
   const [mood, setMood] = useState<'smile' | 'grin'>('smile')
   const cameraRef = useRef<HTMLInputElement>(null)
   const uploadRef = useRef<HTMLInputElement>(null)
-  const look = lookFor(a)
   const styleName = styles.find(s => s.id === a.style)!.name
 
-  const redraw = (patch: Partial<State['avatar']> = {}) => {
+  const redraw = async (patch: Partial<State['avatar']> = {}, fresh = false) => {
+    const next = { ...a, ...patch }
     setDrawing(true)
-    window.setTimeout(() => { setA(v => ({ ...v, ...patch })); setMood(m => (m === 'smile' ? 'grin' : 'smile')); setDrawing(false) }, 650)
+    try {
+      const { avatarUrl } = await generateAvatar({ style: apiStyle(next.style), look: describeLook(next), photo: photoData.current, fresh })
+      setA({ ...next, image: avatarUrl })
+    } catch {
+      // No server or key yet: keep the built-in cartoon so the screen still works.
+      setA({ ...next, image: undefined })
+      toast("Couldn't reach the artist. Showing the sketch version.")
+    }
+    setMood(m => (m === 'smile' ? 'grin' : 'smile'))
+    setDrawing(false)
   }
-  const onFile = (f?: File) => {
+  const onFile = async (f?: File) => {
     if (!f) return
     setSelfie(URL.createObjectURL(f))
-    redraw()
+    photoData.current = await photoToDataUrl(f).catch(() => undefined)
+    redraw({}, true)
   }
 
   return (
@@ -125,7 +153,7 @@ export function AvatarStep() {
         <IconArrow size={28} />
         <figure>
           <Halftone swatch={a.style === 'sketch' ? 'gray' : a.style === 'hero' ? 'blue' : 'yellow'} className={`portrait art ${drawing ? 'drawing' : ''}`}>
-            <Cartoon look={look} style={a.style} mood={mood} />
+            <AvatarFace avatar={a} mood={mood} />
             {drawing && <span className="inking">Inking…</span>}
           </Halftone>
           <figcaption>{styleName}</figcaption>
@@ -146,7 +174,7 @@ export function AvatarStep() {
       <div className="btn-row three">
         <button className="btn btn-sm" onClick={() => cameraRef.current?.click()}>Take selfie</button>
         <button className="btn btn-sm" onClick={() => uploadRef.current?.click()}>Upload</button>
-        <button className="btn btn-sm" onClick={() => redraw()}><IconRefresh size={18} /> Redraw</button>
+        <button className="btn btn-sm" disabled={drawing} onClick={() => redraw({}, true)}><IconRefresh size={18} /> Redraw</button>
       </div>
       <input ref={cameraRef} type="file" accept="image/*" capture="user" hidden onChange={e => onFile(e.target.files?.[0])} />
       <input ref={uploadRef} type="file" accept="image/*" hidden onChange={e => onFile(e.target.files?.[0])} />
@@ -203,7 +231,7 @@ export function Joined() {
             </li>
           ))}
           <li className="you" style={{ animationDelay: '280ms' }}>
-            <span className="avatar-circle c-purple"><Cartoon look={lookFor(state.avatar)} style={state.avatar.style} crop="face" /></span>
+            <span className="avatar-circle c-purple"><AvatarFace avatar={state.avatar} crop="face" /></span>
             <b>{state.profile.name.trim() || 'You'}</b><i className="new-hire">New hire</i>
           </li>
         </ul>

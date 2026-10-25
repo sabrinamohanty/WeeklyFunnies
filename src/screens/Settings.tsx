@@ -1,10 +1,9 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Cartoon } from '../components/Cartoon'
 import { IconBookmark, IconChevron, IconGear, IconPencil, IconPlus } from '../components/Icons'
 import { BRAND, Cover, MiniMast, Screen } from '../components/ui'
 import { useStore } from '../store'
-import { lookFor } from './Onboarding'
+import { AvatarFace } from './Onboarding'
 
 /** Gear button that opens Settings; sits in the header of the reading pages. */
 export function SettingsButton() {
@@ -44,7 +43,7 @@ export function Settings() {
       <h1 className="display">Settings</h1>
 
       <section className="settings-profile">
-        <span className="avatar-circle c-purple"><Cartoon look={lookFor(state.avatar)} style={state.avatar.style} crop="face" /></span>
+        <span className="avatar-circle c-purple"><AvatarFace avatar={state.avatar} crop="face" /></span>
         <span>
           <b>{state.profile.name.trim() || 'You'}</b>
           <i>{[state.profile.city, state.email].filter(Boolean).join(' · ') || 'Reporter'}</i>

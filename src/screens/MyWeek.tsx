@@ -4,8 +4,9 @@ import { Cartoon } from '../components/Cartoon'
 import { IconClock, IconGrip, IconPlus, IconRefresh, IconX } from '../components/Icons'
 import { BRAND, Checkbox, Cover, MetaRow, MiniMast, Overlay, Screen, useCountdown } from '../components/ui'
 import { edition, moodCycle, swatchCycle, type Mood, type Swatch } from '../data'
-import { uid, useActivePaper, useStore, type DraftPanel, type DraftStory, type Highlight } from '../store'
-import { lookFor } from './Onboarding'
+import { uid, useActivePaper, useStore, type DraftPanel, type DraftStory, type Highlight, type State } from '../store'
+import { apiStyle, generatePanel, generateStory, imageSrc, type ApiPerson, type ApiStory } from '../api'
+import { describeLook, lookFor } from './Onboarding'
 
 export function ChoosePapers() {
   const nav = useNavigate()
@@ -57,7 +58,7 @@ export function ChoosePapers() {
 
 export function WriteHighlights() {
   const nav = useNavigate()
-  const { state, set } = useStore()
+  const { state, set, toast } = useStore()
   const [printing, setPrinting] = useState(false)
   const hs = state.highlights
   const filled = hs.filter(h => h.text.trim()).length
@@ -67,17 +68,59 @@ export function WriteHighlights() {
   const remove = (id: string) => set(s => ({ highlights: s.highlights.filter(h => h.id !== id) }))
   const add = () => set(s => ({ highlights: [...s.highlights, { id: uid('h'), text: '', photos: [], serious: false, inComic: true }] }))
 
-  const generate = () => {
+  const generate = async () => {
     setPrinting(true)
     const name = state.profile.name.trim() || 'Our reporter'
     const written = hs.filter(h => h.text.trim())
-    const stories: DraftStory[] = written.map(h => ({ highlightId: h.id, ...writeStory(h.text, name, state.profile.city, h.serious, 0), alt: 0 }))
     const comic = written.filter(h => h.inComic)
-    const panels: DraftPanel[] = Array.from({ length: PANELS }, (_, k) => ({
-      id: uid('p'), swatch: swatchCycle[k % swatchCycle.length]!, mood: (['o', 'grin', 'flat', 'smile'] as Mood[])[k]!,
-      caption: comic[k % Math.max(1, comic.length)]?.text ?? '',
-    }))
-    window.setTimeout(() => { set({ draft: { stories, panels } }); nav('/my-week/review') }, 3600)
+    const me = reporter(state)
+    const started = Date.now()
+
+    // Offline stand-in, used when the writer or artist can't be reached.
+    const localDraft = () => {
+      const stories: DraftStory[] = written.map(h => ({ highlightId: h.id, ...writeStory(h.text, name, state.profile.city, h.serious, 0), alt: 0 }))
+      const panels: DraftPanel[] = Array.from({ length: PANELS }, (_, k) => ({
+        id: uid('p'), swatch: swatchCycle[k % swatchCycle.length]!, mood: (['o', 'grin', 'flat', 'smile'] as Mood[])[k]!,
+        caption: comic[k % Math.max(1, comic.length)]?.text ?? '',
+      }))
+      return { stories, panels }
+    }
+
+    let draft: { stories: DraftStory[]; panels: DraftPanel[] }
+    let scripts: NonNullable<ApiStory['comic']>['panels'] = []
+    try {
+      const story = await generateStory({
+        weekLabel: edition.week, people: [me],
+        highlights: written.map(h => ({ personId: me.id, text: h.text, serious: h.serious, inComic: h.inComic })),
+      })
+      const local = localDraft()
+      scripts = story.comic?.panels ?? []
+      draft = {
+        stories: [{ highlightId: written[0]!.id, headline: story.article.headline, article: story.article.body, alt: 0 }],
+        panels: scripts.length === PANELS
+          ? scripts.map((p, k) => ({
+              id: uid('p'), swatch: local.panels[k]!.swatch, mood: local.panels[k]!.mood,
+              caption: p.caption ?? p.dialogue[0]?.text ?? '', scene: p.scene, characters: p.characters, loading: true,
+            }))
+          : local.panels,
+      }
+    } catch {
+      toast("Couldn't reach the writer. Here's a draft you can edit.")
+      draft = localDraft()
+    }
+
+    // Let the press animation play at least a moment, then show the proof sheet and fill panels as they finish.
+    await new Promise(r => window.setTimeout(r, Math.max(0, 1800 - (Date.now() - started))))
+    set({ draft })
+    nav('/my-week/review')
+
+    const patchPanel = (id: string, patch: Partial<DraftPanel>) =>
+      set(s => (s.draft ? { draft: { ...s.draft, panels: s.draft.panels.map(p => (p.id === id ? { ...p, ...patch } : p)) } } : {}))
+    draft.panels.filter(p => p.scene).forEach(p => {
+      generatePanel({ style: apiStyle(state.avatar.style), panel: { scene: p.scene!, characters: p.characters! }, people: [me] })
+        .then(r => patchPanel(p.id, { image: r.imageUrl, loading: false }))
+        .catch(() => patchPanel(p.id, { loading: false }))
+    })
   }
 
   return (
@@ -150,6 +193,11 @@ function HighlightCard({ h, n, canRemove, update, remove }: { h: Highlight; n: n
 
 /** Comic strips are a 2×2 grid of four panels. */
 const PANELS = 4
+
+/** The signed-in person as the story and image models see them: a first name, a fixed look, their avatar. */
+function reporter(state: State): ApiPerson {
+  return { id: 'me', name: state.profile.name.trim() || 'Reporter', look: describeLook(state.avatar), avatarUrl: state.avatar.image }
+}
 
 const pressSteps = ['Reading your highlights…', 'Writing headlines…', 'Inking comic panels…', 'Stop the presses!']
 
@@ -230,15 +278,34 @@ export function Review() {
     set(s => ({ draft: { ...s.draft!, stories: s.draft!.stories.map((st, j) => (j === i ? { ...st, ...patch } : st)) } }))
   const setPanels = (panels: DraftPanel[]) => set(s => ({ draft: { ...s.draft!, panels } }))
 
-  const rewrite = (i: number) => {
+  const rewrite = async (i: number) => {
     const st = draft.stories[i]!
     const h = state.highlights.find(x => x.id === st.highlightId)
     if (!h) return
     const alt = st.alt + 1
+    // A story the writer produced is rewritten by the writer; the offline stand-in covers the rest.
+    if (draft.panels.some(p => p.scene)) {
+      try {
+        const written = state.highlights.filter(x => x.text.trim())
+        const r = await generateStory({
+          weekLabel: edition.week, people: [reporter(state)],
+          highlights: written.map(x => ({ personId: 'me', text: x.text, serious: x.serious, inComic: x.inComic })),
+        })
+        return setStory(i, { headline: r.article.headline, article: r.article.body, alt })
+      } catch { toast("Couldn't reach the writer. Try again in a moment.") }
+    }
     setStory(i, { ...writeStory(h.text, name, state.profile.city, h.serious, alt), alt })
   }
   const redraw = (k: number) => {
     const p = draft.panels[k]!
+    if (p.scene) {
+      const patch = (x: Partial<DraftPanel>) => set(s => (s.draft ? { draft: { ...s.draft, panels: s.draft.panels.map(q => (q.id === p.id ? { ...q, ...x } : q)) } } : {}))
+      patch({ loading: true })
+      generatePanel({ style: apiStyle(state.avatar.style), panel: { scene: p.scene, characters: p.characters! }, people: [reporter(state)], fresh: true })
+        .then(r => patch({ image: r.imageUrl, loading: false }))
+        .catch(() => { patch({ loading: false }); toast("Couldn't redraw that panel. Try again.") })
+      return
+    }
     setRedrawing(p.id)
     window.setTimeout(() => {
       setPanels(draft.panels.map((x, j) => j === k ? {
@@ -277,7 +344,7 @@ export function Review() {
         <section key={st.highlightId} className="card">
           <div className="card-head">
             <p className="kicker">Highlight {i + 1} · Story</p>
-            <button className="btn btn-sm" onClick={() => rewrite(i)}><IconRefresh size={18} /> Rewrite</button>
+            <button className="btn btn-sm" onClick={() => void rewrite(i)}><IconRefresh size={18} /> Rewrite</button>
           </div>
           <label className="hint" htmlFor={`hl-${i}`}>Headline</label>
           <textarea key={`h${st.alt}`} id={`hl-${i}`} className="field headline-field typed" rows={2} value={st.headline} onChange={e => setStory(i, { headline: e.target.value })} />
@@ -303,8 +370,11 @@ export function Review() {
                 if (step) { e.preventDefault(); move(k, k + step) }
               }}>
               <span className="panel-label"><IconGrip size={14} /> Panel {k + 1}</span>
-              <Cartoon look={look} style={state.avatar.style} mood={p.mood} />
-              <button className="panel-redraw" disabled={redrawing !== null} onClick={() => redraw(k)} aria-label={`Redraw panel ${k + 1}`}>
+              {p.image
+                ? <img className="panel-art" src={imageSrc(p.image)} alt={`Panel ${k + 1}: ${p.caption}`} draggable={false} />
+                : <Cartoon look={look} style={state.avatar.style} mood={p.mood} />}
+              {p.loading && <span className="inking">Inking…</span>}
+              <button className="panel-redraw" disabled={redrawing !== null || !!p.loading} onClick={() => redraw(k)} aria-label={`Redraw panel ${k + 1}`}>
                 <IconRefresh size={15} /> Redraw
               </button>
             </div>
