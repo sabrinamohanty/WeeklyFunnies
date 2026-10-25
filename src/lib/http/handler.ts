@@ -74,13 +74,11 @@ export function errorResponse(err: ApiError, requestId: string): Response {
   return json(
     err.status,
     {
-      error: {
-        code: err.code,
-        message: err.message,
-        requestId,
-        ...(err.details?.length ? { details: err.details } : {}),
-        ...(err.retryAfterSeconds ? { retryAfterSeconds: err.retryAfterSeconds } : {}),
-      },
+      error: err.message,
+      code: err.code,
+      requestId,
+      ...(err.details?.length ? { details: err.details } : {}),
+      ...(err.retryAfterSeconds ? { retryAfterSeconds: err.retryAfterSeconds } : {}),
     },
     requestId,
     headers,
@@ -101,7 +99,7 @@ async function enforceRateLimit(limiter: RateLimiter, key: string, limit: number
 /**
  * Wraps a route handler with the standard pipeline, in this order:
  * request id, IP rate limit, authentication, user rate limit, params, query, body, handler,
- * success envelope. Every failure becomes the standard error envelope. Unknown errors are logged
+ * JSON response. Every failure becomes the standard error shape. Unknown errors are logged
  * by name only and returned as a generic `internal` error.
  */
 export function defineRoute<C extends RouteContract>(
@@ -179,7 +177,7 @@ export function defineRoute<C extends RouteContract>(
         query: query as RouteContext<C>["query"],
         body: body as BodyOf<C>,
       });
-      response = json(result.status ?? contract.success.status, { data: result.data }, requestId);
+      response = json(result.status ?? contract.success.status, result.data, requestId);
     } catch (err) {
       if (err instanceof ApiError) {
         response = errorResponse(err, requestId);

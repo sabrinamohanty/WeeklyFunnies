@@ -86,7 +86,10 @@ describe("GET/PATCH /api/me", () => {
       birthday: null,
       zodiacSign: null,
       onboarded: false,
+      look: null,
+      avatars: [],
     });
+    expect(profile).not.toHaveProperty("avatarUrl");
   });
 
   it("sets name and birthday, deriving the zodiac sign", async () => {
@@ -146,7 +149,7 @@ describe("GET/PATCH /api/me", () => {
       call(patchMe, { method: "PATCH", path: "/api/me", token: ama.token, body });
     await expectError(await patch({ cityId: 1 }), 404, "not_found");
     const unknown = await expectError(await patch({ name: "Ama", latitude: 1 }), 400, "bad_request");
-    expect(JSON.stringify(unknown.error.details)).toContain("latitude");
+    expect(JSON.stringify(unknown.details)).toContain("latitude");
     await expectError(
       await patch({ city: { name: "Kumasi", timezone: "Africa/Accra" } }),
       400,

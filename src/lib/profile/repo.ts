@@ -11,13 +11,14 @@ import { signUrls } from "@/lib/storage/signed";
 type Profile = z.input<typeof profileSchema>;
 
 const COLUMNS =
-  "id, name, city_name, city_admin1, city_country, timezone, birthday, zodiac_sign, avatar_path, created_at";
+  "id, name, city_name, city_admin1, city_country, timezone, birthday, zodiac_sign, look, avatar_path, created_at";
 
 export async function getProfile(userId: string): Promise<Profile> {
   const row = unwrapMaybe(await serviceDb().from("profiles").select(COLUMNS).eq("id", userId).maybeSingle());
   if (!row) throw new ApiError("not_found");
 
   const urls = await signUrls("avatars", [row.avatar_path]);
+  const avatarUrl = row.avatar_path ? urls.get(row.avatar_path) : undefined;
   return {
     id: row.id,
     name: row.name,
@@ -27,7 +28,9 @@ export async function getProfile(userId: string): Promise<Profile> {
         : null,
     birthday: row.birthday,
     zodiacSign: row.zodiac_sign as ZodiacSign | null,
-    avatarUrl: row.avatar_path ? (urls.get(row.avatar_path) ?? null) : null,
+    look: row.look,
+    // Until per-style avatars are stored (Phase 4), the single stored avatar is reported as classic.
+    avatars: avatarUrl ? [{ style: "classic", url: avatarUrl }] : [],
     onboarded: Boolean(row.name && row.city_name && row.birthday && row.avatar_path),
     createdAt: row.created_at,
   };

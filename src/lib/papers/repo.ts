@@ -1,5 +1,5 @@
 import type { z } from "zod";
-import type { ZodiacSign } from "@/lib/contract/common";
+import type { StyleKey, ZodiacSign } from "@/lib/contract/common";
 import type { inviteSchema, memberSchema, paperSchema } from "@/lib/contract/papers";
 import { serviceDb } from "@/lib/db/client";
 import { unwrap, unwrapMaybe } from "@/lib/db/errors";
@@ -48,7 +48,7 @@ export async function listPapers(userId: string): Promise<Paper[]> {
   const rows = unwrap(
     await serviceDb()
       .from("paper_members")
-      .select("role, papers!inner(id, name, created_at)")
+      .select("role, papers!inner(id, name, style, created_at)")
       .eq("user_id", userId),
   );
   const counts = await memberCounts(rows.map((r) => r.papers.id));
@@ -56,6 +56,7 @@ export async function listPapers(userId: string): Promise<Paper[]> {
     .map((r) => ({
       id: r.papers.id,
       name: r.papers.name,
+      style: r.papers.style as StyleKey,
       role: r.role,
       memberCount: counts.get(r.papers.id) ?? 0,
       createdAt: r.papers.created_at,
@@ -65,10 +66,17 @@ export async function listPapers(userId: string): Promise<Paper[]> {
 
 export async function getPaper(paperId: string, role: Role): Promise<Paper> {
   const p = unwrap(
-    await serviceDb().from("papers").select("id, name, created_at").eq("id", paperId).single(),
+    await serviceDb().from("papers").select("id, name, style, created_at").eq("id", paperId).single(),
   );
   const counts = await memberCounts([paperId]);
-  return { id: p.id, name: p.name, role, memberCount: counts.get(paperId) ?? 0, createdAt: p.created_at };
+  return {
+    id: p.id,
+    name: p.name,
+    style: p.style as StyleKey,
+    role,
+    memberCount: counts.get(paperId) ?? 0,
+    createdAt: p.created_at,
+  };
 }
 
 /** The contributor list. Only public profile fields: no birthday, coordinates, or storage paths. */
@@ -95,12 +103,15 @@ export async function listMembers(paperId: string): Promise<Member[]> {
   }));
 }
 
-export async function createPaper(userId: string, name: string): Promise<string> {
-  return unwrap(await serviceDb().rpc("create_paper", { p_user: userId, p_name: name }));
+export async function createPaper(userId: string, name: string, style: StyleKey): Promise<string> {
+  return unwrap(await serviceDb().rpc("create_paper", { p_user: userId, p_name: name, p_style: style }));
 }
 
-export async function renamePaper(paperId: string, name: string): Promise<void> {
-  unwrap(await serviceDb().from("papers").update({ name }).eq("id", paperId).select("id").single());
+export async function updatePaper(
+  paperId: string,
+  changes: { name?: string; style?: StyleKey },
+): Promise<void> {
+  unwrap(await serviceDb().from("papers").update(changes).eq("id", paperId).select("id").single());
 }
 
 // ---------- Invites ----------

@@ -4,10 +4,11 @@ import { RealModerator, RealProvider } from "./providers/real/provider";
 import { StubModerator } from "./providers/stub/moderator";
 import { StubProvider } from "./providers/stub/provider";
 import { createAiService } from "./service";
-import type { AiProvider, AiService, Moderator, StyleConfig } from "./types";
+import type { AiProvider, AiService, Moderator } from "./types";
 
 export { AiError, toApiError } from "./errors";
-export { createAiService, firstNameOf } from "./service";
+export { createAiService, firstNameOf, panelCacheKey } from "./service";
+export { STYLES, styleConfig } from "./styles";
 export type * from "./types";
 
 export function selectProvider(): AiProvider {
@@ -28,10 +29,6 @@ export function selectModerator(): Moderator {
   return c.MODERATION_PROVIDER === "real"
     ? new RealModerator({ apiKey: c.MODERATION_REAL_API_KEY! })
     : new StubModerator();
-}
-
-export function styleConfig(): StyleConfig {
-  return { styleId: getConfig().AI_STYLE_ID };
 }
 
 let service: AiService | undefined;

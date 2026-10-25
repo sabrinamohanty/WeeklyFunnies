@@ -1,6 +1,8 @@
 import { z } from "zod";
-import { roleSchema, signedUrl, timestamp, uuid, zodiacSignSchema } from "./common";
+import { roleSchema, signedUrl, styleKeySchema, timestamp, uuid, zodiacSignSchema } from "./common";
 import { TEXT_LIMITS, textField } from "./text";
+
+export const PAPER_MAX_MEMBERS = 8;
 
 export const paperIdParams = z.strictObject({ paperId: uuid });
 export const inviteIdParams = z.strictObject({ paperId: uuid, inviteId: uuid });
@@ -9,8 +11,9 @@ export const paperSchema = z
   .strictObject({
     id: uuid,
     name: z.string(),
+    style: styleKeySchema,
     role: roleSchema.meta({ description: "The caller's role in this paper." }),
-    memberCount: z.number().int().nonnegative(),
+    memberCount: z.number().int().nonnegative().max(PAPER_MAX_MEMBERS),
     createdAt: timestamp,
   })
   .meta({ id: "Paper" });
@@ -21,7 +24,9 @@ export const memberSchema = z
     name: z.string().nullable().meta({ description: "Null until the member finishes onboarding." }),
     city: z.string().nullable().meta({ description: "City name only." }),
     zodiacSign: zodiacSignSchema.nullable(),
-    avatarUrl: signedUrl.nullable(),
+    avatarUrl: signedUrl
+      .nullable()
+      .meta({ description: "The member's avatar in the paper's style, if any." }),
     role: roleSchema,
     joinedAt: timestamp,
   })
@@ -31,10 +36,18 @@ export const paperDetailSchema = paperSchema
   .extend({ members: z.array(memberSchema) })
   .meta({ id: "PaperDetail" });
 
+const paperName = textField({ max: TEXT_LIMITS.paperName, description: "Paper name." });
+
 export const createPaperRequestSchema = z
-  .strictObject({ name: textField({ max: TEXT_LIMITS.paperName, description: "Paper name." }) })
+  .strictObject({ name: paperName, style: styleKeySchema.default("classic") })
   .meta({ id: "CreatePaperRequest" });
-export const updatePaperRequestSchema = createPaperRequestSchema.meta({ id: "UpdatePaperRequest" });
+export const updatePaperRequestSchema = z
+  .strictObject({ name: paperName.optional(), style: styleKeySchema.optional() })
+  .refine((b) => b.name !== undefined || b.style !== undefined, { message: "At least one field is required" })
+  .meta({
+    id: "UpdatePaperRequest",
+    description: "Changing the style applies to panels generated afterwards. Owner only.",
+  });
 
 export const paperResponseSchema = z.strictObject({ paper: paperSchema });
 export const paperDetailResponseSchema = z.strictObject({ paper: paperDetailSchema });

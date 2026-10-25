@@ -8,13 +8,13 @@ describe("Phase 0 routes", () => {
   it("health answers ok", async () => {
     const res = await health(new Request("http://localhost/api/health"));
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ data: { status: "ok" } });
+    expect(await res.json()).toEqual({ status: "ok" });
   });
 
   it("user routes answer 401 without a token, before any lookup", async () => {
     const res = await getMe(new Request("http://localhost/api/me"));
     expect(res.status).toBe(401);
-    expect(((await res.json()) as ErrorEnvelope).error.code).toBe("unauthorized");
+    expect(((await res.json()) as ErrorEnvelope).code).toBe("unauthorized");
   });
 
   it("cron stubs authenticate first, then answer 501", async () => {
@@ -25,6 +25,6 @@ describe("Phase 0 routes", () => {
       }),
     );
     expect(res.status).toBe(501);
-    expect(((await res.json()) as ErrorEnvelope).error.code).toBe("not_implemented");
+    expect(((await res.json()) as ErrorEnvelope).code).toBe("not_implemented");
   });
 });

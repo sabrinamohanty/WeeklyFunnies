@@ -1,33 +1,36 @@
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import { isoDate, ZODIAC_SIGNS } from "@/lib/contract/common";
 import { cleanText, codePointLength, TEXT_LIMITS } from "@/lib/contract/text";
 import { log } from "@/lib/log/logger";
 import type { RateLimiter } from "@/lib/ratelimit";
 import { newBoundary } from "@/lib/safety/delimit";
-import { fallbackEvent, fallbackHoroscope } from "@/lib/safety/fallback";
+import { fallbackHoroscope, fallbackStory } from "@/lib/safety/fallback";
+import { buildLook } from "@/lib/safety/look";
 import {
   checkHoroscopeOutput,
-  checkWriterOutput,
+  checkStoryOutput,
   horoscopeOutputSchema,
-  panelDescription,
-  writerOutputSchema,
+  storyOutputSchema,
+  storyText,
+  type RefStory,
   type RejectReason,
+  type StoryCheckInput,
 } from "@/lib/safety/output";
 import {
   buildAvatarImagePrompt,
   buildHoroscopeUserPrompt,
   buildPanelImagePrompt,
-  buildWriterUserPrompt,
+  buildStoryUserPrompt,
   HOROSCOPE_SYSTEM_PROMPT,
-  WRITER_SYSTEM_PROMPT,
+  STORY_SYSTEM_PROMPT,
 } from "@/lib/safety/prompts";
 import { redactPersonalData } from "@/lib/safety/redact";
 import { AiError } from "./errors";
 import { isValidImage } from "./image";
 import { CircuitBreaker, CircuitOpenError, Semaphore, TimeoutError, withTimeout } from "./resilience";
 import {
-  panelSpecSchema,
-  SERIOUS_MOODS,
+  STORY_LIMITS,
   type AiCallContext,
   type AiProvider,
   type AiService,
@@ -38,8 +41,9 @@ import {
   type JsonTask,
   type ModerationResult,
   type Moderator,
+  type Story,
+  type StoryCharacter,
   type StyleConfig,
-  type WrittenEvent,
 } from "./types";
 
 export interface AiSettings {
@@ -61,7 +65,7 @@ export interface AiServiceDeps {
 }
 
 const DAY_MS = 86_400_000;
-const WRITER_JSON_SCHEMA = z.toJSONSchema(writerOutputSchema) as Record<string, unknown>;
+const STORY_JSON_SCHEMA = z.toJSONSchema(storyOutputSchema) as Record<string, unknown>;
 const HOROSCOPE_JSON_SCHEMA = z.toJSONSchema(horoscopeOutputSchema) as Record<string, unknown>;
 
 /** First word of a display name, letters only, so a name field can't carry instructions. */
@@ -69,6 +73,30 @@ export function firstNameOf(name: string): string {
   const first = cleanText(name, "single-line").split(" ")[0] ?? "";
   const letters = first.replace(/[^\p{L}\p{M}'’-]/gu, "").replace(/^[-'’]+|[-'’]+$/g, "");
   return Array.from(letters).slice(0, 30).join("");
+}
+
+/** Short, unique, letters-only names for the prompt. Duplicates get a last initial, then a number. */
+export function promptNames(fullNames: string[]): string[] {
+  const out: string[] = [];
+  for (const full of fullNames) {
+    const first = firstNameOf(full) || "Friend";
+    let name = first;
+    if (out.includes(name)) {
+      const initial = firstNameOf(cleanText(full, "single-line").split(" ")[1] ?? "")
+        .charAt(0)
+        .toUpperCase();
+      if (initial) name = `${first} ${initial}`;
+    }
+    for (let n = 2; out.includes(name); n++) name = `${first} ${n}`;
+    out.push(name);
+  }
+  return out;
+}
+
+/** Cache key for a panel image: identical style, cast, and scene never pay twice. */
+export function panelCacheKey(scene: string, characters: StoryCharacter[], style: StyleConfig): string {
+  const cast = characters.map((c) => `${c.name}|${c.look}`).join(";");
+  return createHash("sha256").update(`${style.key}\n${cast}\n${scene}`).digest("hex");
 }
 
 type Op = "text" | "image" | "moderation";
@@ -79,26 +107,31 @@ function outcomeOf(err: unknown): string {
   return "error";
 }
 
+function blocked(m: ModerationResult, field: string): AiError {
+  return new AiError("content_blocked", {
+    reason: m.categories.includes("self_harm") ? "self_harm" : undefined,
+    field,
+  });
+}
+
 export function createAiService(deps: AiServiceDeps): AiService {
   const { provider, moderator, limiter, settings } = deps;
   const now = deps.now ?? Date.now;
   const boundary = deps.boundary ?? newBoundary;
   const semaphore = new Semaphore(settings.maxConcurrency);
-  const breakers: Record<Op, CircuitBreaker> = {
-    text: new CircuitBreaker(settings.circuitFailureThreshold, settings.circuitCooldownMs, now),
-    image: new CircuitBreaker(settings.circuitFailureThreshold, settings.circuitCooldownMs, now),
-    moderation: new CircuitBreaker(settings.circuitFailureThreshold, settings.circuitCooldownMs, now),
-  };
+  const breaker = () => new CircuitBreaker(settings.circuitFailureThreshold, settings.circuitCooldownMs, now);
+  const breakers: Record<Op, CircuitBreaker> = { text: breaker(), image: breaker(), moderation: breaker() };
 
   /** Every outbound call: bounded concurrency, circuit breaker, deadline, metadata-only logging. */
   async function call<T extends { meta?: CallMeta }>(
     op: Op,
-    task: JsonTask | ImageTask | "moderate",
+    task: JsonTask | ImageTask | "moderate_text" | "moderate_image",
     attempt: number,
     ctx: AiCallContext,
     fn: (pctx: CallContext) => Promise<T>,
   ): Promise<T> {
     const started = now();
+    const vendor = op === "moderation" ? moderator.id : provider.id;
     try {
       const result = await withTimeout(
         (signal) =>
@@ -115,7 +148,7 @@ export function createAiService(deps: AiServiceDeps): AiService {
         task,
         attempt,
         outcome: "ok",
-        provider: result.meta?.provider ?? (op === "moderation" ? moderator.id : provider.id),
+        provider: result.meta?.provider ?? vendor,
         model: result.meta?.model,
         latencyMs: now() - started,
         inputTokenCount: result.meta?.inputTokens,
@@ -128,7 +161,7 @@ export function createAiService(deps: AiServiceDeps): AiService {
         task,
         attempt,
         outcome: outcomeOf(err),
-        provider: op === "moderation" ? moderator.id : provider.id,
+        provider: vendor,
         latencyMs: now() - started,
         errorName: err instanceof Error ? err.name : "unknown",
       });
@@ -145,18 +178,31 @@ export function createAiService(deps: AiServiceDeps): AiService {
     log.warn("ai_output_rejected", { requestId: ctx.requestId, task, attempt, rejectReason: reason });
   }
 
+  function logModeration(ctx: AiCallContext, r: ModerationResult) {
+    log.info("ai_moderation", {
+      requestId: ctx.requestId,
+      decision: r.decision,
+      categoryCount: r.categories.length,
+    });
+  }
+
   /** Fails closed: if moderation can't run, nothing is generated. */
-  async function moderate(text: string, ctx: AiCallContext): Promise<ModerationResult> {
-    const result = await call("moderation", "moderate", 1, ctx, async (pctx) => ({
+  async function moderateText(text: string, ctx: AiCallContext): Promise<ModerationResult> {
+    const r = await call("moderation", "moderate_text", 1, ctx, async (pctx) => ({
       ...(await moderator.checkText(text, pctx)),
       meta: undefined,
     }));
-    log.info("ai_moderation", {
-      requestId: ctx.requestId,
-      decision: result.decision,
-      categoryCount: result.categories.length,
-    });
-    return { decision: result.decision, categories: result.categories };
+    logModeration(ctx, r);
+    return { decision: r.decision, categories: r.categories };
+  }
+
+  async function moderateImage(image: ImageBytes, ctx: AiCallContext): Promise<ModerationResult> {
+    const r = await call("moderation", "moderate_image", 1, ctx, async (pctx) => ({
+      ...(await moderator.checkImage(image, pctx)),
+      meta: undefined,
+    }));
+    logModeration(ctx, r);
+    return { decision: r.decision, categories: r.categories };
   }
 
   async function quota(kind: "text" | "image", ctx: AiCallContext): Promise<void> {
@@ -170,13 +216,14 @@ export function createAiService(deps: AiServiceDeps): AiService {
   async function image(
     task: ImageTask,
     prompt: string,
-    reference: ImageBytes,
+    references: ImageBytes[],
     style: StyleConfig,
     ctx: AiCallContext,
   ): Promise<ImageBytes> {
+    const aspectRatio = task === "avatar" ? "1:1" : "4:3";
     for (let attempt = 1; attempt <= 2; attempt++) {
       const { image } = await call("image", task, attempt, ctx, (pctx) =>
-        provider.generateImage({ task, prompt, reference, style }, pctx),
+        provider.generateImage({ task, prompt, references, aspectRatio, style }, pctx),
       );
       if (isValidImage(image)) return { bytes: image.bytes, mimeType: image.mimeType };
       rejected(ctx, task, attempt, "image");
@@ -184,102 +231,167 @@ export function createAiService(deps: AiServiceDeps): AiService {
     throw new AiError("generation_failed");
   }
 
-  return {
-    async writeEvent(input, ctx) {
-      const text = cleanText(input.text, "multiline");
-      if (!text || codePointLength(text) > TEXT_LIMITS.highlight) throw new Error("writeEvent: invalid text");
-      const authorFirstName = firstNameOf(input.authorFirstName);
-      const source = redactPersonalData(text).text;
+  function prepareStory(input: Parameters<AiService["writeStory"]>[0]) {
+    const { people, highlights } = input;
+    if (people.length < 1 || people.length > STORY_LIMITS.people)
+      throw new Error("writeStory: people out of range");
+    if (highlights.length < 1 || highlights.length > STORY_LIMITS.highlights) {
+      throw new Error("writeStory: highlights out of range");
+    }
+    if (new Set(people.map((p) => p.userId)).size !== people.length)
+      throw new Error("writeStory: duplicate people");
+    if (new Set(highlights.map((h) => h.id)).size !== highlights.length) {
+      throw new Error("writeStory: duplicate highlights");
+    }
+    const names = promptNames(people.map((p) => p.name));
+    const personRef = new Map(people.map((p, i) => [p.userId, `p${i + 1}`]));
+    const check: StoryCheckInput = {
+      weekLabel: cleanText(input.weekLabel, "single-line").slice(0, 40),
+      people: people.map((p, i) => ({ ref: `p${i + 1}`, name: names[i]! })),
+      highlights: highlights.map((h, i) => {
+        const ref = personRef.get(h.userId);
+        const text = cleanText(h.text, "multiline");
+        if (!ref) throw new Error("writeStory: highlight author is not in people");
+        if (!text || codePointLength(text) > TEXT_LIMITS.highlight)
+          throw new Error("writeStory: invalid text");
+        return {
+          ref: `h${i + 1}`,
+          personRef: ref,
+          text: redactPersonalData(text).text,
+          serious: h.serious,
+          inComic: h.inComic,
+        };
+      }),
+    };
+    const userIdOf = new Map(people.map((p, i) => [`p${i + 1}`, p.userId]));
+    const highlightIdOf = new Map(highlights.map((h, i) => [`h${i + 1}`, h.id]));
+    const nameOf = new Map(check.people.map((p) => [p.ref, p.name]));
 
-      const moderation = await moderate(source, ctx);
-      if (moderation.decision === "block") {
-        throw new AiError("content_blocked", {
-          reason: moderation.categories.includes("self_harm") ? "self_harm" : undefined,
-          field: "body.text",
-        });
+    const resolve = (s: RefStory): Story => ({
+      article: {
+        headline: s.article.headline,
+        bylineUserId: userIdOf.get(s.article.bylineRef)!,
+        byline: nameOf.get(s.article.bylineRef)!,
+        body: s.article.body,
+      },
+      comic: s.comic && {
+        title: s.comic.title,
+        panels: s.comic.panels.map((p) => ({
+          scene: p.scene,
+          caption: p.caption,
+          dialogue: p.dialogue.map((d) => ({
+            speakerUserId: userIdOf.get(d.speakerRef)!,
+            speaker: nameOf.get(d.speakerRef)!,
+            text: d.text,
+            side: d.side,
+          })),
+          characterUserIds: p.characterRefs.map((r) => userIdOf.get(r)!),
+          highlightIds: p.momentRefs.map((r) => highlightIdOf.get(r)!),
+        })),
+      },
+    });
+    return { check, resolve };
+  }
+
+  return {
+    async checkHighlight(input, ctx) {
+      const text = cleanText(input.text, "multiline");
+      if (!text) throw new Error("checkHighlight: empty text");
+      const moderation = await moderateText(redactPersonalData(text).text, ctx);
+      if (moderation.decision === "block") throw blocked(moderation, "body.text");
+      return { serious: moderation.decision === "sensitive", moderation };
+    },
+
+    async checkPhoto(input, ctx) {
+      if (!isValidImage(input.image)) throw new Error("checkPhoto: not an image");
+      const moderation = await moderateImage(input.image, ctx);
+      if (moderation.decision === "block") throw blocked(moderation, "body.photo");
+    },
+
+    async describeLook(input, ctx) {
+      let note: string | undefined;
+      if (input.traits.note) {
+        const cleaned = redactPersonalData(cleanText(input.traits.note, "single-line"))
+          .text.replace(/\[(?:email|link|phone)\]/g, " ")
+          .trim();
+        if (cleaned) {
+          const moderation = await moderateText(cleaned, ctx);
+          if (moderation.decision === "block") throw blocked(moderation, "body.traits.note");
+          note = cleaned;
+        }
       }
-      const serious = input.serious || moderation.decision === "sensitive";
+      return { look: buildLook(input.traits, note) };
+    },
+
+    async generateAvatar(input, ctx) {
+      if (!input.look.trim()) throw new AiError("generation_failed");
+      const references: ImageBytes[] = [];
+      if (input.photo) {
+        if (!isValidImage(input.photo)) throw new AiError("generation_failed");
+        const moderation = await moderateImage(input.photo, ctx);
+        if (moderation.decision === "block") throw blocked(moderation, "body.photo");
+        references.push(input.photo);
+      }
+      await quota("image", ctx);
+      return image("avatar", buildAvatarImagePrompt(input.look, input.style), references, input.style, ctx);
+    },
+
+    async writeStory(input, ctx) {
+      const { check, resolve } = prepareStory(input);
       await quota("text", ctx);
 
-      const user = buildWriterUserPrompt({ text: source, authorFirstName, serious, boundary: boundary() });
-      let written: WrittenEvent | undefined;
-      for (let attempt = 1; attempt <= 2 && !written; attempt++) {
-        const { raw } = await call("text", "write_event", attempt, ctx, (pctx) =>
+      const user = buildStoryUserPrompt({ ...check, boundary: boundary() });
+      let story: RefStory | undefined;
+      for (let attempt = 1; attempt <= 2 && !story; attempt++) {
+        const { raw } = await call("text", "story", attempt, ctx, (pctx) =>
           provider.completeJson(
             {
-              task: "write_event",
-              system: WRITER_SYSTEM_PROMPT,
+              task: "story",
+              system: STORY_SYSTEM_PROMPT,
               user,
-              jsonSchema: WRITER_JSON_SCHEMA,
-              maxOutputTokens: 600,
+              jsonSchema: STORY_JSON_SCHEMA,
+              maxOutputTokens: 2_000,
             },
             pctx,
           ),
         );
-        const checked = checkWriterOutput(raw, { source, authorFirstName, serious });
+        const checked = checkStoryOutput(raw, check);
         if (!checked.ok) {
-          rejected(ctx, "write_event", attempt, checked.reason);
+          rejected(ctx, "story", attempt, checked.reason);
           continue;
         }
-        const out = checked.value;
-        const outMod = await moderate(`${out.headline}\n${out.article}\n${panelDescription(out.panel)}`, ctx);
-        if (outMod.decision === "block") {
-          rejected(ctx, "write_event", attempt, "moderation");
+        const moderation = await moderateText(storyText(checked.value), ctx);
+        if (moderation.decision === "block") {
+          rejected(ctx, "story", attempt, "moderation");
           break;
         }
-        written = out;
+        story = checked.value;
       }
 
-      const usedFallback = !written;
-      return {
-        ...(written ?? fallbackEvent(text, authorFirstName, serious)),
-        serious,
-        moderation,
-        usedFallback,
-      };
+      return { ...resolve(story ?? fallbackStory(check)), usedFallback: !story };
     },
 
     async generatePanel(input, ctx) {
-      const parsed = panelSpecSchema.safeParse(input.panel);
-      if (!parsed.success) throw new AiError("generation_failed");
-      const panel = parsed.data;
-      if (input.serious && !SERIOUS_MOODS.includes(panel.mood)) panel.mood = "calm";
-      if (!isValidImage(input.avatar)) throw new AiError("generation_failed");
+      const scene = cleanText(input.scene, "single-line");
+      const { characters } = input;
+      if (!scene || codePointLength(scene) > STORY_LIMITS.scene) throw new AiError("generation_failed");
+      if (characters.length < 1 || characters.length > STORY_LIMITS.charactersPerPanel) {
+        throw new AiError("generation_failed");
+      }
+      if (characters.some((c) => c.avatar && !isValidImage(c.avatar))) throw new AiError("generation_failed");
 
-      const moderation = await moderate(panelDescription(panel), ctx);
+      const moderation = await moderateText(scene, ctx);
       if (moderation.decision === "block") throw new AiError("content_blocked", { field: "panel" });
       await quota("image", ctx);
 
+      const references = characters.flatMap((c) => (c.avatar ? [c.avatar] : []));
       return image(
         "panel",
-        buildPanelImagePrompt(panel, input.serious, input.style),
-        input.avatar,
+        buildPanelImagePrompt(scene, characters, input.style),
+        references,
         input.style,
         ctx,
       );
-    },
-
-    async generateAvatar(input, ctx) {
-      if (!isValidImage(input.selfie)) throw new AiError("generation_failed");
-      let note: string | undefined;
-      if (input.tweaks?.note) {
-        const cleaned = redactPersonalData(cleanText(input.tweaks.note, "single-line"))
-          .text.replace(/\[(?:email|link|phone)\]/g, " ")
-          .trim();
-        if (cleaned) {
-          const moderation = await moderate(cleaned, ctx);
-          if (moderation.decision === "block") {
-            throw new AiError("content_blocked", {
-              reason: moderation.categories.includes("self_harm") ? "self_harm" : undefined,
-              field: "body.tweaks.note",
-            });
-          }
-          note = cleaned;
-        }
-      }
-      await quota("image", ctx);
-      const prompt = buildAvatarImagePrompt({ ...input.tweaks, note }, input.style);
-      return image("avatar", prompt, input.selfie, input.style, ctx);
     },
 
     async generateHoroscope(input, ctx) {
@@ -300,7 +412,7 @@ export function createAiService(deps: AiServiceDeps): AiService {
         );
         const checked = checkHoroscopeOutput(raw);
         if (checked.ok) {
-          const moderation = await moderate(checked.value, ctx);
+          const moderation = await moderateText(checked.value, ctx);
           if (moderation.decision !== "block") return checked.value;
           rejected(ctx, "horoscope", attempt, "moderation");
           break;

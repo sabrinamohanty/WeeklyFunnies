@@ -2,7 +2,16 @@ import { createAiService, type AiSettings } from "@/lib/ai/service";
 import { StubModerator } from "@/lib/ai/providers/stub/moderator";
 import { StubProvider, type FaultPlan } from "@/lib/ai/providers/stub/provider";
 import { solidPng } from "@/lib/ai/providers/stub/png";
-import type { AiProvider, CallContext, ImageBytes, Moderator, ModerationResult } from "@/lib/ai/types";
+import { styleConfig } from "@/lib/ai/styles";
+import type {
+  AiProvider,
+  CallContext,
+  ImageBytes,
+  Moderator,
+  ModerationResult,
+  StoryHighlight,
+  StoryPerson,
+} from "@/lib/ai/types";
 import { MemoryRateLimiter } from "@/lib/ratelimit";
 
 export const SETTINGS: AiSettings = {
@@ -14,10 +23,38 @@ export const SETTINGS: AiSettings = {
   circuitCooldownMs: 10_000,
 };
 
-export const STYLE = { styleId: "test-style" };
+export const STYLE = styleConfig("classic");
 export const AVATAR: ImageBytes = { bytes: solidPng([10, 20, 30]), mimeType: "image/png" };
-export const SELFIE: ImageBytes = { bytes: solidPng([200, 150, 100]), mimeType: "image/png" };
+export const AVATAR_2: ImageBytes = { bytes: solidPng([40, 50, 60]), mimeType: "image/png" };
+export const PHOTO: ImageBytes = { bytes: solidPng([200, 150, 100]), mimeType: "image/png" };
 export const ctx = (userId = "user-1") => ({ requestId: "req_test", userId });
+
+export const AMA = "11111111-1111-4111-8111-111111111111";
+export const BEN = "22222222-2222-4222-8222-222222222222";
+export const H1 = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+export const H2 = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+
+export const PEOPLE: StoryPerson[] = [
+  { userId: AMA, name: "Ama Serwaa" },
+  { userId: BEN, name: "Ben Okafor" },
+];
+
+export const highlight = (text: string, extra: Partial<StoryHighlight> = {}): StoryHighlight => ({
+  id: H1,
+  userId: AMA,
+  text,
+  serious: false,
+  inComic: true,
+  ...extra,
+});
+
+export const BEN_HIGHLIGHT: StoryHighlight = {
+  id: H2,
+  userId: BEN,
+  text: "Baked sourdough bread for the first time",
+  serious: false,
+  inComic: true,
+};
 
 type JsonReq = Parameters<AiProvider["completeJson"]>[0];
 type ImageReq = Parameters<AiProvider["generateImage"]>[0];
@@ -46,6 +83,7 @@ export class RecordingProvider implements AiProvider {
 export class RecordingModerator implements Moderator {
   readonly id = "recording";
   readonly texts: string[] = [];
+  readonly images: ImageBytes[] = [];
 
   constructor(
     private readonly inner: Moderator = new StubModerator(),
@@ -55,6 +93,11 @@ export class RecordingModerator implements Moderator {
   async checkText(text: string, c: CallContext) {
     this.texts.push(text);
     return this.override?.(text) ?? this.inner.checkText(text, c);
+  }
+
+  async checkImage(image: ImageBytes, c: CallContext) {
+    this.images.push(image);
+    return this.inner.checkImage(image, c);
   }
 }
 

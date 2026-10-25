@@ -1,4 +1,7 @@
-import type { CallContext, ModerationCategory, ModerationResult, Moderator } from "../../types";
+import type { CallContext, ImageBytes, ModerationCategory, ModerationResult, Moderator } from "../../types";
+
+/** Tests embed this marker in image bytes to simulate an image the moderator blocks. */
+export const STUB_BLOCKED_IMAGE_MARKER = "MW_TEST_BLOCK_IMAGE";
 
 // Keyword rules for development and tests only. They are deliberately simple and are not real
 // moderation; config refuses MODERATION_PROVIDER=stub in production.
@@ -37,5 +40,10 @@ export class StubModerator implements Moderator {
       ...(PROFANITY.test(text) ? (["profanity"] as const) : []),
     ];
     return { decision: sensitive.length ? "sensitive" : "allow", categories };
+  }
+
+  async checkImage(image: ImageBytes, _ctx: CallContext): Promise<ModerationResult> {
+    const found = Buffer.from(image.bytes).includes(STUB_BLOCKED_IMAGE_MARKER);
+    return found ? { decision: "block", categories: ["sexual"] } : { decision: "allow", categories: [] };
   }
 }

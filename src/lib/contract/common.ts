@@ -26,10 +26,12 @@ export type ZodiacSign = z.infer<typeof zodiacSignSchema>;
 
 export const roleSchema = z.enum(["owner", "member"]).meta({ id: "Role" });
 
-/** Wraps a success payload in the standard `{ data }` envelope. */
-export function dataEnvelope<T extends z.ZodType>(schema: T) {
-  return z.strictObject({ data: schema });
-}
+export const STYLE_KEYS = ["classic", "manga", "sketch", "superhero"] as const;
+export const styleKeySchema = z.enum(STYLE_KEYS).meta({
+  id: "StyleKey",
+  description: "Art style preset. Set per paper by the owner; avatars and panels use the paper's style.",
+});
+export type StyleKey = z.infer<typeof styleKeySchema>;
 
 export const emptyBody = z.strictObject({});
 

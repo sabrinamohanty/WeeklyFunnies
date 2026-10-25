@@ -1,6 +1,5 @@
 import { expect } from "vitest";
 import type { z } from "zod";
-import { dataEnvelope } from "@/lib/contract/common";
 import { type ErrorEnvelope, errorEnvelopeSchema } from "@/lib/contract/errors";
 import type { RouteContract } from "@/lib/contract/routes";
 
@@ -41,16 +40,16 @@ export async function expectOk<C extends RouteContract>(
 ): Promise<z.output<C["success"]["schema"]>> {
   const json = await res.json();
   expect(res.status, JSON.stringify(json)).toBe(contract.success.status);
-  const parsed = dataEnvelope(contract.success.schema).safeParse(json);
+  const parsed = contract.success.schema.safeParse(json);
   expect(parsed.success, parsed.success ? "" : JSON.stringify(parsed.error.issues)).toBe(true);
-  return (json as { data: z.output<C["success"]["schema"]> }).data;
+  return json as z.output<C["success"]["schema"]>;
 }
 
-/** Asserts an error response in the standard envelope. */
+/** Asserts an error response in the standard shape. */
 export async function expectError(res: Response, status: number, code: string): Promise<ErrorEnvelope> {
   const json = await res.json();
   expect(res.status, JSON.stringify(json)).toBe(status);
   expect(errorEnvelopeSchema.safeParse(json).success).toBe(true);
-  expect((json as ErrorEnvelope).error.code).toBe(code);
+  expect((json as ErrorEnvelope).code).toBe(code);
   return json as ErrorEnvelope;
 }

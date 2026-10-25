@@ -159,6 +159,46 @@ describe("papers", () => {
     expect((await expectOk(asAma, routes.updatePaper)).paper.name).toBe("Renamed");
   });
 
+  it("sets the art style at creation, and only the owner can change it", async () => {
+    const res = await call(createPaper, {
+      method: "POST",
+      path: "/api/papers",
+      token: ama.token,
+      body: { name: "Manga Monthly", style: "manga" },
+    });
+    const { paper } = await expectOk(res, routes.createPaper);
+    papers.push(paper.id);
+    expect(paper.style).toBe("manga");
+    expect(
+      (
+        await expectOk(
+          await call(listPapers, { method: "GET", path: "/api/papers", token: ama.token }),
+          routes.listPapers,
+        )
+      ).papers.find((p) => p.id === paper.id)?.style,
+    ).toBe("manga");
+    expect(createPaperRequestSchema.parse({ name: "x" }).style).toBe("classic");
+
+    const invite = await newInvite(ama, paper.id);
+    await expectOk(await join(cole, invite.code), routes.joinPaper);
+    const patch = (u: TestUser, body: unknown) =>
+      call(patchPaper, {
+        method: "PATCH",
+        path: `/api/papers/${paper.id}`,
+        token: u.token,
+        params: { paperId: paper.id },
+        body,
+      });
+
+    await expectError(await patch(cole, { style: "sketch" }), 403, "forbidden");
+    await expectError(await patch(ama, { style: "watercolor" }), 400, "bad_request");
+    await expectError(await patch(ama, {}), 400, "bad_request");
+    const updated = await expectOk(await patch(ama, { style: "sketch" }), routes.updatePaper);
+    expect(updated.paper).toMatchObject({ name: "Manga Monthly", style: "sketch" });
+    const { data } = await serviceClient().from("papers").select("style").eq("id", paper.id).single();
+    expect(data?.style).toBe("sketch");
+  });
+
   it("handles every shared text case for the paper name", async () => {
     for (const tc of textCases) {
       const res = await call(createPaper, {
@@ -303,7 +343,7 @@ describe("joining by code", () => {
     const bodies = [];
     for (const code of [formatInviteCode(generateInviteCode()), revoked.code, expired.code]) {
       const err = await expectError(await join(cole, code), 404, "not_found");
-      bodies.push({ ...err.error, requestId: "" });
+      bodies.push({ ...err, requestId: "" });
     }
     expect(new Set(bodies.map((b) => JSON.stringify(b))).size).toBe(1);
   });
@@ -335,7 +375,7 @@ describe("joining by code", () => {
     const owner = await createUser("full-owner");
     users.push(owner);
     const id = await newPaper(owner, "Full House");
-    const fillers = await Promise.all(Array.from({ length: 11 }, (_, i) => createUser(`filler-${i}`)));
+    const fillers = await Promise.all(Array.from({ length: 7 }, (_, i) => createUser(`filler-${i}`)));
     users.push(...fillers);
     await serviceClient()
       .from("paper_members")

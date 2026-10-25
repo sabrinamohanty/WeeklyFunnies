@@ -1,16 +1,15 @@
-import { z } from "zod";
-import type { ZodiacSign } from "@/lib/contract/common";
-import type { AvatarTweaks } from "@/lib/contract/profile";
+import type { StyleKey, ZodiacSign } from "@/lib/contract/common";
+import type { AvatarTraits } from "@/lib/contract/profile";
 
 export interface ImageBytes {
   bytes: Uint8Array;
   mimeType: "image/png" | "image/jpeg" | "image/webp";
 }
 
-/** Art style for avatars and panels. Owned by design; selected by AI_STYLE_ID. */
+/** A style preset: the key the paper stores and the prompt fragment design owns (see styles.ts). */
 export interface StyleConfig {
-  styleId: string;
-  params?: Record<string, string>;
+  key: StyleKey;
+  fragment: string;
 }
 
 /** What routes and jobs pass to the AiService. */
@@ -37,36 +36,69 @@ export interface CallMeta {
   outputTokens?: number;
 }
 
-export const MOODS = [
-  "joyful",
-  "proud",
-  "relaxed",
-  "excited",
-  "silly",
-  "cozy",
-  "determined",
-  "calm",
-  "reflective",
-] as const;
-export type Mood = (typeof MOODS)[number];
+export const STORY_LIMITS = {
+  people: 8,
+  highlights: 24,
+  panels: 4,
+  dialoguePerPanel: 2,
+  dialogueWords: 12,
+  captionWords: 15,
+  charactersPerPanel: 2,
+  paragraphsMin: 3,
+  paragraphsMax: 5,
+  headline: 120,
+  title: 80,
+  body: 1_500,
+  scene: 300,
+} as const;
 
-/** Moods allowed for serious events. */
-export const SERIOUS_MOODS: readonly Mood[] = ["calm", "reflective"];
+// ---------- Story (what the AiService returns, with real ids) ----------
 
-/** Structured comic panel description. The image prompt is built from these fields by a fixed template. */
-export const panelSpecSchema = z.strictObject({
-  setting: z.string().min(1).max(80),
-  action: z.string().min(1).max(120),
-  mood: z.enum(MOODS),
-  props: z.array(z.string().min(1).max(30)).max(3),
-});
-export type PanelSpec = z.infer<typeof panelSpecSchema>;
-
-export interface WrittenEvent {
-  headline: string;
-  article: string;
-  panel: PanelSpec;
+export interface StoryDialogue {
+  speakerUserId: string;
+  speaker: string;
+  text: string;
+  side: "left" | "right";
 }
+
+export interface StoryPanel {
+  /** What to draw. Server-side only: never shown to readers. */
+  scene: string;
+  caption: string | null;
+  dialogue: StoryDialogue[];
+  characterUserIds: string[];
+  /** The highlights this panel depicts. Their photos are pinned to the panel. */
+  highlightIds: string[];
+}
+
+export interface Story {
+  article: { headline: string; bylineUserId: string; byline: string; body: string };
+  comic: { title: string; panels: StoryPanel[] } | null;
+}
+
+export interface StoryPerson {
+  userId: string;
+  /** Display name. The service reduces it to a letters-only first name before use. */
+  name: string;
+}
+
+export interface StoryHighlight {
+  id: string;
+  userId: string;
+  text: string;
+  serious: boolean;
+  /** False for serious highlights by default. These appear in the article only, never the comic. */
+  inComic: boolean;
+}
+
+export interface StoryCharacter {
+  name: string;
+  look: string;
+  /** The character's avatar in the paper's style, if one exists. Sent as a reference image. */
+  avatar?: ImageBytes;
+}
+
+// ---------- Moderation ----------
 
 export type ModerationDecision = "allow" | "sensitive" | "block";
 
@@ -90,7 +122,9 @@ export interface ModerationResult {
   categories: ModerationCategory[];
 }
 
-export type JsonTask = "write_event" | "horoscope";
+// ---------- Provider and moderator (vendor layer) ----------
+
+export type JsonTask = "story" | "horoscope";
 export type ImageTask = "avatar" | "panel";
 
 /**
@@ -116,8 +150,12 @@ export interface AiProvider {
       task: ImageTask;
       /** Built from validated fields by a fixed template. Never raw user text. */
       prompt: string;
-      /** The selfie (avatar step only) or the approved avatar (panel step). */
-      reference: ImageBytes;
+      /**
+       * Avatar step: the person's photo, if they gave one. Panel step: the avatars of the characters
+       * in frame. Empty means text-only generation.
+       */
+      references: ImageBytes[];
+      aspectRatio: "1:1" | "4:3";
       style: StyleConfig;
       seed?: number;
     },
@@ -129,30 +167,40 @@ export interface AiProvider {
 export interface Moderator {
   readonly id: string;
   checkText(text: string, ctx: CallContext): Promise<ModerationResult>;
+  checkImage(image: ImageBytes, ctx: CallContext): Promise<ModerationResult>;
 }
 
-export interface WriteEventResult extends WrittenEvent {
-  /** True if the input was sensitive and serious treatment was forced on. */
-  serious: boolean;
-  moderation: ModerationResult;
+// ---------- Service (what routes call) ----------
+
+export interface StoryResult extends Story {
   usedFallback: boolean;
 }
 
 /**
- * What routes call. Owns prompt building, delimiters, moderation, output validation, grounding
- * checks, retries, fallbacks, timeouts, caps, and the circuit breaker. Throws AiError.
+ * Owns prompt building, delimiters, moderation, output validation, grounding checks, retries,
+ * fallbacks, timeouts, caps, and the circuit breaker. Throws AiError.
  */
 export interface AiService {
+  /** Moderates a highlight when it's written. Blocks, or reports that it should be treated as serious. */
+  checkHighlight(
+    input: { text: string },
+    ctx: AiCallContext,
+  ): Promise<{ serious: boolean; moderation: ModerationResult }>;
+  /** Moderates an uploaded photo before it's stored or sent to any model. */
+  checkPhoto(input: { image: ImageBytes }, ctx: AiCallContext): Promise<void>;
+  /** Turns the trait form into the fixed look text. Moderates the free-text note. */
+  describeLook(input: { traits: AvatarTraits }, ctx: AiCallContext): Promise<{ look: string }>;
   generateAvatar(
-    input: { selfie: ImageBytes; tweaks?: AvatarTweaks; style: StyleConfig },
+    input: { look: string; photo?: ImageBytes; style: StyleConfig },
     ctx: AiCallContext,
   ): Promise<ImageBytes>;
-  writeEvent(
-    input: { text: string; serious: boolean; authorFirstName: string },
+  /** One article and one 4-panel comic for the whole edition. */
+  writeStory(
+    input: { weekLabel: string; people: StoryPerson[]; highlights: StoryHighlight[] },
     ctx: AiCallContext,
-  ): Promise<WriteEventResult>;
+  ): Promise<StoryResult>;
   generatePanel(
-    input: { avatar: ImageBytes; panel: PanelSpec; serious: boolean; style: StyleConfig },
+    input: { scene: string; characters: StoryCharacter[]; style: StyleConfig },
     ctx: AiCallContext,
   ): Promise<ImageBytes>;
   generateHoroscope(input: { sign: ZodiacSign; weekStart: string }, ctx: AiCallContext): Promise<string>;

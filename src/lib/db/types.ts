@@ -312,6 +312,7 @@ export type Database = {
           created_by: string | null;
           id: string;
           name: string;
+          style: string;
           updated_at: string;
         };
         ComputedFields: never;
@@ -320,6 +321,7 @@ export type Database = {
           created_by?: string | null;
           id?: string;
           name: string;
+          style?: string;
           updated_at?: string;
         };
         Update: {
@@ -327,6 +329,7 @@ export type Database = {
           created_by?: string | null;
           id?: string;
           name?: string;
+          style?: string;
           updated_at?: string;
         };
         Relationships: [
@@ -393,6 +396,7 @@ export type Database = {
       profiles: {
         Row: {
           avatar_path: string | null;
+          avatar_traits: Json | null;
           birthday: string | null;
           city_admin1: string | null;
           city_country: string | null;
@@ -404,6 +408,7 @@ export type Database = {
           lat: number | null;
           lng: number | null;
           logged_out_at: string | null;
+          look: string | null;
           name: string | null;
           timezone: string | null;
           updated_at: string;
@@ -412,6 +417,7 @@ export type Database = {
         ComputedFields: never;
         Insert: {
           avatar_path?: string | null;
+          avatar_traits?: Json | null;
           birthday?: string | null;
           city_admin1?: string | null;
           city_country?: string | null;
@@ -423,6 +429,7 @@ export type Database = {
           lat?: number | null;
           lng?: number | null;
           logged_out_at?: string | null;
+          look?: string | null;
           name?: string | null;
           timezone?: string | null;
           updated_at?: string;
@@ -430,6 +437,7 @@ export type Database = {
         };
         Update: {
           avatar_path?: string | null;
+          avatar_traits?: Json | null;
           birthday?: string | null;
           city_admin1?: string | null;
           city_country?: string | null;
@@ -441,6 +449,7 @@ export type Database = {
           lat?: number | null;
           lng?: number | null;
           logged_out_at?: string | null;
+          look?: string | null;
           name?: string | null;
           timezone?: string | null;
           updated_at?: string;
@@ -494,7 +503,7 @@ export type Database = {
       [_ in never]: never;
     };
     Functions: {
-      create_paper: { Args: { p_name: string; p_user: string }; Returns: string };
+      create_paper: { Args: { p_name: string; p_style?: string; p_user: string }; Returns: string };
       join_paper: { Args: { p_code_hash: string; p_user: string }; Returns: string };
       rate_limit_hit: {
         Args: { p_key: string; p_limit: number; p_window_seconds: number };

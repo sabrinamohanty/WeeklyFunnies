@@ -8,10 +8,13 @@
 | 1. Database, storage, RLS          | Done        |
 | 2. Auth, papers, membership        | Done        |
 | 3. AI placeholder layer and safety | Done        |
-| 4. Core routes                     | Next        |
+| 4. Core routes and data            | Next        |
 | 5. Weather, birthdays, horoscopes  | Not started |
 | 6. Retention                       | Not started |
-| 7. Seed data and docs              | Not started |
+| 7. Seed data and frontend check    | Not started |
+| 8. Real AI providers               | Not started |
+
+The README has the detailed list of what each remaining phase covers.
 
 ## Setup
 
@@ -35,13 +38,15 @@ pnpm dev
 - `src/app/api/**/route.ts`: thin route files. Each wraps a contract entry with `defineRoute`.
 - `src/lib/contract/`: Zod schemas and the route registry (`routes.ts`). The single source for validation,
   OpenAPI, and route-coverage tests.
-- `src/lib/http/`: the request pipeline (`defineRoute`), body limits, and the error envelope.
-- `src/proxy.ts`: JSON 404 and 405 for unknown paths and methods.
+- `src/lib/http/`: the request pipeline (`defineRoute`), body limits, and the error shape.
+- `src/proxy.ts`: the CORS allowlist, and JSON 404 and 405 for unknown paths and methods.
 - `src/lib/config/env.ts`: environment schema. It fails fast on boot and errors name keys, never values.
 - `src/lib/ai/`: `AiService` (`service.ts`), interfaces (`types.ts`), timeouts, concurrency and circuit
   breaker (`resilience.ts`), and providers: `providers/stub/` (deterministic) and `providers/real/` (the
   vendor plug-in point, not integrated yet).
-- `src/lib/safety/`: redaction, delimiters, prompt templates, output validation, grounding, fallbacks.
+- `src/lib/ai/styles.ts`: the four art style presets (design owns the text).
+- `src/lib/safety/`: redaction, delimiters, prompt templates, the look builder, output validation,
+  grounding, fallbacks.
 - `src/lib/log/`: metadata-only JSON logger with key-based redaction.
 - `tests/fixtures/text-cases.ts`: shared text cases for every text route and the AI safety layer.
 - `supabase/migrations/`: schema (`…0100`), grants and row-level security (`…0200`), buckets and storage
@@ -50,7 +55,7 @@ pnpm dev
   (service role only).
 - `src/lib/db/`, `src/lib/papers/`, `src/lib/profile/`, `src/lib/geo/`: the service-key client, repos,
   invite codes, and the Open-Meteo geocoder.
-- `tests/ai/`: the full text-case suite through the writer and the name field, failure paths, and safety
+- `tests/ai/`: the full text-case suite through highlight moderation, the story writer and name fields, failure paths, and safety
   unit tests. `live.test.ts` runs only with `AI_LIVE_TESTS=1`.
 - `tests/integration/`: two-user table tests, storage tests, database invariant tests, and API tests for
   `me`, papers, invites, and joining.
@@ -74,23 +79,50 @@ pnpm dev
 - **New env vars:** `INVITE_CODE_PEPPER` (required, at least 32 chars), `RATE_LIMIT_STORE`, and
   `RATE_LIMIT_ROUTE_SCALE` (tests only; config refuses anything but 1 in production).
 
-## AI layer (Phase 3)
+## AI layer (Phase 3, aligned with the comic pipeline handoff)
 
-Routes only ever call `getAiService()` from `@/lib/ai`. A lint rule blocks vendor SDK imports anywhere
-except `src/lib/ai/providers/real/`, and blocks importing a provider directly from outside `src/lib/ai`.
-The full pipeline is described in `docs/api-contract.md` under "AI layer". In short:
+The handoff (`comic-pipeline-handoff.md`) replaced the per-highlight design. What changed and why:
 
-- User text is redacted (emails, links, phones), moderated, and sent only inside delimiters with a
-  random per-call id. System prompts are constants.
-- Output must match a strict schema, be plain text, respect `serious`, and pass a grounding check. One
-  retry, then a fallback built from the person's own words. Generated text is moderated too.
-- Image prompts come from fixed templates whose fields are reduced to letters and basic punctuation.
-  The selfie goes only to the avatar step; panels get the avatar.
-- Deadlines, a concurrency cap, circuit breakers, and per-user daily caps on every call. Moderation
-  failures fail closed. Logs carry metadata only.
-- `content_blocked` for self-harm uses a fixed supportive message and the `self_harm_support` issue.
+- **One story per edition.** The owner generates one article and one 4-panel comic from everyone's
+  approved highlights. Highlights are moderated when written and generate nothing on their own.
+- **Styles per paper.** The owner picks `classic`, `manga`, `sketch`, or `superhero`; the fragment is added
+  to every avatar and panel prompt. `AI_STYLE_ID` is gone.
+- **Looks.** The trait form becomes a fixed look text, stored and reused word for word in every panel.
+  Avatars come from the look alone or the look plus an optional photo (moderated, own avatar only).
+- **Speech is never drawn.** Captions and dialogue come back as JSON and the client overlays them.
+- **Handoff route shapes, server-authoritative.** `/api/story`, `/api/panel`, `/api/avatar` take the
+  handoff's bodies plus `editionId`; echoed ids are verified and stored data is always what's used, so a
+  client can't send its own scene to the image model.
+
+Safety pipeline (details in `docs/api-contract.md` under "AI layer"):
+
+- User text is redacted (emails, links, phones), moderated, and sent only inside delimiters with a random
+  per-call id. People and highlights go to the model as `p1`/`h1` refs, never real ids. System prompts are
+  constants.
+- Output must match a strict schema (code fences stripped) and pass checks: byline, 3 to 5 paragraphs,
+  4 panels, word limits, no quoted text in scenes, valid characters, speakers and moments, plain text,
+  serious highlights kept out of the comic, and grounding. One retry, then a safe fallback story built
+  from everyone's own words. Generated text is moderated too.
+- Image prompts are the handoff's fixed templates, with fields reduced to safe characters. Scenes are
+  moderated before any image call. Photos are moderated before use.
+- Deadlines, a concurrency cap, circuit breakers, per-user daily caps, a panel cache key (style, cast and
+  scene), and metadata-only logs.
+
+Deviations from the handoff, on purpose:
+
+- **Fallback instead of 502 for the story.** The handoff returns 502 after one retry. The original brief
+  asks for a safe default, so the server stores a fallback story marked `fallback_used` that the owner can
+  edit or regenerate. Provider outages and timeouts still return `503 provider_unavailable`.
+- **`sources` on panels** (the highlight ids a panel shows) so photos pin to panels automatically.
+- **`photoUrl` must be ours.** Avatar photos are uploaded through `POST /api/avatar/photo`; the server
+  never fetches a client-supplied URL.
+- **Error responses** keep `code` and `requestId` next to the handoff's `error` string.
 
 ## Database (Phase 1)
+
+Phase 3 migration `…0500` added `papers.style`, `profiles.look` and `profiles.avatar_traits`, an 8-member
+cap, and a style argument on `create_paper`. The story, panel, per-style avatar and highlight tables come
+in Phase 4.
 
 Tables: `profiles`, `avatar_drafts`, `papers`, `paper_members`, `invites`, `editions`, `events`, `photos`,
 `horoscopes`, and `storage_deletions`. Helper functions live in a private `app` schema that the REST API
@@ -112,7 +144,7 @@ What the database enforces for every role, including the service key the API use
 
 - Published editions are read-only: no new events or photos, and no content or approval changes. A panel
   can still finish generating, and publishing can't be undone.
-- Limits: at most 3 highlights per person per edition, 4 photos per event, and 12 members per paper.
+- Limits: at most 3 highlights per person per edition, 4 photos per event, and 8 members per paper.
   Weeks must start on a Monday.
 - Storage paths must sit inside the author's own folder.
 - Text lengths match the API limits. The zodiac sign is derived from the birthday.
@@ -130,6 +162,7 @@ What app roles can do directly (defense in depth; the app is meant to go through
 
 - **Stack:** Next.js 16 route handlers on Vercel; Supabase for Auth, Postgres, and Storage; Zod 4; Vitest;
   pnpm. TypeScript is pinned to 6.0 because typescript-eslint doesn't support 7.x yet.
+- **Frontend:** a separate web app on its own origin, allowed by an exact-origin CORS list.
 - **Auth:** the app uses Supabase Auth directly. The API verifies the bearer token, so there's no sign-in
   route.
 - **Jobs:** a Postgres jobs table with `SKIP LOCKED`, kicked off with `after()`, plus a cron sweep.
@@ -144,9 +177,10 @@ What app roles can do directly (defense in depth; the app is meant to go through
     logout;
   - the avatar is part of the profile and is kept;
   - the selfie is kept until avatar approval, 1 hour at most.
-- **Papers:** a user can be in several papers. Only the owner publishes, and only approved strips are
-  published. Weeks start Monday in the owner's timezone.
-- **Invites:** multi-use codes with a 7-day expiry, revocable, stored hashed, with a 12-member cap.
+- **Papers:** a user can be in several papers. The owner picks the style, generates the story and
+  panels, and publishes. Only approved highlights go into the story. Weeks start Monday in the owner's
+  timezone.
+- **Invites:** multi-use codes with a 7-day expiry, revocable, stored hashed, with an 8-member cap.
 - **Profile:** full birthday stored, but only month and day are ever shown to others. The user picks a
   city from geocode candidates.
 - **Weather:** the reader's own city, a 7-day forecast cached per city per day.
@@ -154,7 +188,8 @@ What app roles can do directly (defense in depth; the app is meant to go through
   highlight.
 - **Moderation:** self-harm and crisis content is blocked with a supportive message. Other sensitive
   topics force `serious` on.
-- **AI layer:** an `AiService` (safety lives here) over a thin `AiProvider`, with a structured `PanelSpec`.
+- **AI layer:** an `AiService` (safety lives here) over a thin `AiProvider`. One story per edition, styles
+  per paper, looks per person, photo optional. Real vendors (Anthropic, Meta Muse Image) come in Phase 8.
   A lint rule blocks vendor SDK imports outside `src/lib/ai/providers/real/`.
 - **Draft visibility:** in a draft, members see only their own posts, plus each member's progress status.
   Others' events appear after publishing. The bundle and row-level security both enforce this.
@@ -191,7 +226,11 @@ None right now.
   case only get the number check, and invented lowercase facts aren't caught. The system prompt is the
   main defence.
 - **Per-instance limits:** the concurrency cap and circuit breakers live in process memory, so each
-  serverless instance has its own. Phase 4's jobs table adds a global cap for panel jobs.
+  serverless instance has its own.
+- **Panels wait for the image** (handoff shape), so the story, avatar and panel routes set
+  `maxDuration = 60`. Check that the Vercel plan allows that duration.
+- **The `events` table still has the old per-highlight columns** (headline, article, panel). Phase 4
+  migrates it to highlights and adds story and panel tables.
 - **AI daily caps fail open with the rate-limit store.** If Postgres is unreachable, caps aren't
   enforced, but nothing else works either in that case.
 
@@ -199,5 +238,8 @@ None right now.
 
 - 0.2.0: `Member.name` is nullable, and invite creation is capped at 5 active invites (`409 conflict`).
 - 0.3.0: `content_blocked` errors include `details`; the self-harm case has a fixed supportive message.
+- 0.4.0: bare JSON responses and flat errors; one story per edition with `/api/story` and `/api/panel`;
+  `/api/events` became `/api/highlights`; avatars per style with `/api/avatar/photo`; paper `style`; 8-member
+  cap; CORS.
 
 See the changelog in `docs/api-contract.md`.

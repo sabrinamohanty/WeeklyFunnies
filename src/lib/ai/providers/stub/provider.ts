@@ -1,13 +1,5 @@
 import { createHash } from "node:crypto";
-import { unwrapUntrusted } from "@/lib/safety/delimit";
-import {
-  SERIOUS_MOODS,
-  MOODS,
-  type AiProvider,
-  type CallContext,
-  type ImageTask,
-  type JsonTask,
-} from "../../types";
+import type { AiProvider, CallContext, ImageTask, JsonTask } from "../../types";
 import { solidPng } from "./png";
 
 /** Ways the stub can misbehave, so tests can drive every failure path without a vendor. */
@@ -15,33 +7,30 @@ export type StubFault =
   | "error"
   | "timeout"
   | "not_json"
+  | "fenced"
   | "extra_fields"
   | "link"
   | "markup"
   | "ungrounded"
   | "too_long"
+  | "bad_refs"
+  | "scene_text"
   | "bad_image";
 
 export type FaultPlan =
   StubFault | undefined | ((task: JsonTask | ImageTask, call: number) => StubFault | undefined);
 
-function hash(s: string): Buffer {
-  return createHash("sha256").update(s).digest();
-}
+const hash = (s: string) => createHash("sha256").update(s).digest();
 
-function pick<T>(items: readonly T[], seed: Buffer, i: number): T {
-  return items[seed[i % seed.length]! % items.length]!;
-}
-
-const SETTINGS = ["a sunny park", "a cozy kitchen", "a busy street", "a bright living room", "a quiet cafe"];
-const ACTIONS = ["smiling at the moment", "cheering happily", "laughing with delight", "taking it all in"];
-const SERIOUS_SETTINGS = ["a quiet room with soft light", "a calm garden"];
-const SERIOUS_ACTIONS = ["sitting quietly", "looking out of a window"];
+const SCENES = [
+  "a sunny park, the character beaming with pride, wide shot",
+  "a cozy kitchen, the character laughing, medium shot",
+  "a busy street, the character cheering, low angle",
+  "a bright living room, the character relaxing, close-up",
+];
 
 function words(text: string): string[] {
-  return (
-    text.match(/[\p{L}\p{M}\p{N}'’]+/gu)?.filter((w) => w !== "link" && w !== "email" && w !== "phone") ?? []
-  );
+  return text.match(/[\p{L}\p{M}\p{N}'’]+/gu)?.filter((w) => !["link", "email", "phone"].includes(w)) ?? [];
 }
 
 function fit(parts: string[], max: number): string {
@@ -54,26 +43,83 @@ function fit(parts: string[], max: number): string {
   return out;
 }
 
-/** Writes like an ideal model: only the person's own words, plain text, valid shape. */
-function writeEvent(user: string, seed: Buffer) {
-  const name = words(unwrapUntrusted(user, "author_name") ?? "")[0] ?? "Friend";
-  const text = unwrapUntrusted(user, "highlight") ?? "";
-  const serious = user.startsWith("Tone: serious");
-  const w = words(text);
-  const headline = w.length ? fit([`${name}:`, ...w.slice(0, 8)], 120) : `${name}'s week`;
-  const body = fit(w, 520);
-  const article = serious
-    ? `${name} shared something from the week.${body ? ` In their words: ${body}.` : ""}`
-    : `${name} had a week worth sharing.${body ? ` In their words: ${body}.` : ""}`;
+interface Parsed {
+  week: string;
+  people: Array<{ ref: string; name: string }>;
+  highlights: Array<{ ref: string; personRef: string; comic: boolean; serious: boolean; text: string }>;
+}
+
+function parse(user: string): Parsed {
+  const people = [
+    ...user.matchAll(/- id: (p\d+) \| name:\n<<<NAME id=(\w+)>>>\n([\s\S]*?)\n<<<END NAME id=\2>>>/g),
+  ].map((m) => ({ ref: m[1]!, name: m[3]! }));
+  const highlights = [
+    ...user.matchAll(
+      /\[(h\d+)\] person: (p\d+) \| comic: (yes|no) \| tone: (serious|light)\n<<<HIGHLIGHT id=(\w+)>>>\n([\s\S]*?)\n<<<END HIGHLIGHT id=\5>>>/g,
+    ),
+  ].map((m) => ({
+    ref: m[1]!,
+    personRef: m[2]!,
+    comic: m[3] === "yes",
+    serious: m[4] === "serious",
+    text: m[6]!,
+  }));
+  return { week: /^Week of (.*)$/m.exec(user)?.[1] ?? "", people, highlights };
+}
+
+/** Writes like an ideal model: only the people's own words, plain text, valid shape and references. */
+function writeStory(user: string) {
+  const { week, people, highlights } = parse(user);
+  const name = (ref: string) => people.find((p) => p.ref === ref)?.name ?? "Friend";
+  const authors = people.filter((p) => highlights.some((h) => h.personRef === p.ref));
+
+  const lead = highlights.find((h) => !h.serious) ?? highlights[0]!;
+  const leadWords = words(lead.text);
+  const headline = leadWords.length
+    ? fit([`${name(lead.personRef)}:`, ...leadWords.slice(0, 8)], 120)
+    : `${name(lead.personRef)} had a week`;
+
+  // At most 5 paragraphs: one per author, with any authors past the fourth sharing the fifth.
+  const groups =
+    authors.length <= 5
+      ? authors.map((a) => [a])
+      : [...authors.slice(0, 4).map((a) => [a]), authors.slice(4)];
+  const paragraphs = groups.map((group) => {
+    const mine = highlights.filter((h) => group.some((p) => p.ref === h.personRef));
+    const who = group.map((p) => p.name).join(" and ");
+    const said = fit(
+      mine.flatMap((h) => words(h.text)),
+      200,
+    );
+    const open = mine.some((h) => h.serious)
+      ? `${who} shared something from the week.`
+      : `${who} had a week worth sharing.`;
+    return said ? `${open} In their words: ${said}.` : open;
+  });
+  const padding = [`The week of ${week} is in the books.`, "It was quite a week for the group."];
+  while (paragraphs.length < 3) paragraphs.push(padding[paragraphs.length - 1] ?? padding[1]!);
+
+  const comicHighlights = highlights.filter((h) => h.comic && !h.serious);
+  const comic = comicHighlights.length
+    ? {
+        title: "Meanwhile, this week",
+        panels: SCENES.map((scene, i) => {
+          const h = comicHighlights[i % comicHighlights.length]!;
+          const caption = fit(words(h.text).slice(0, 12), 110);
+          return {
+            scene,
+            caption: caption || null,
+            dialogue: [{ speaker: name(h.personRef), text: "What a week!", side: i % 2 ? "right" : "left" }],
+            characters: [h.personRef],
+            moments: [h.ref],
+          };
+        }),
+      }
+    : null;
+
   return {
-    headline,
-    article,
-    panel: {
-      setting: pick(serious ? SERIOUS_SETTINGS : SETTINGS, seed, 0),
-      action: pick(serious ? SERIOUS_ACTIONS : ACTIONS, seed, 1),
-      mood: pick(serious ? SERIOUS_MOODS : MOODS.filter((m) => !SERIOUS_MOODS.includes(m)), seed, 2),
-      props: [],
-    },
+    article: { headline, byline: authors[0]?.name ?? people[0]!.name, body: paragraphs.join("\n\n") },
+    comic,
   };
 }
 
@@ -84,9 +130,7 @@ function abortable(signal: AbortSignal): Promise<never> {
   });
 }
 
-/**
- * Deterministic provider for development and tests. Same input, same output. No network calls.
- */
+/** Deterministic provider for development and tests. Same input, same output. No network calls. */
 export class StubProvider implements AiProvider {
   readonly id = "stub";
   readonly calls: Array<{ task: JsonTask | ImageTask }> = [];
@@ -104,9 +148,8 @@ export class StubProvider implements AiProvider {
     const meta = { provider: this.id, model: "stub-text-1", latencyMs: 0, inputTokens: 0, outputTokens: 0 };
     if (fault === "error") throw new Error("stub provider error");
     if (fault === "timeout") return abortable(ctx.signal);
-    if (fault === "not_json") return { raw: "Sure! Here is your article: ...", meta };
+    if (fault === "not_json") return { raw: "Sure! Here is your story: ...", meta };
 
-    const seed = hash(req.user);
     if (req.task === "horoscope") {
       const sign = /Sign: (\w+)/.exec(req.user)?.[1] ?? "friend";
       const base = { text: `A bright week ahead for ${sign}. Say yes to a small adventure with friends.` };
@@ -115,18 +158,55 @@ export class StubProvider implements AiProvider {
       return { raw: base, meta };
     }
 
-    const out = writeEvent(req.user, seed);
+    const out = writeStory(req.user);
+    const panels = out.comic?.panels ?? [];
     switch (fault) {
+      case "fenced":
+        return { raw: "```json\n" + JSON.stringify(out) + "\n```", meta };
       case "extra_fields":
         return { raw: { ...out, approved: true }, meta };
       case "link":
-        return { raw: { ...out, article: `${out.article} More at https://evil.example/x` }, meta };
+        return {
+          raw: {
+            ...out,
+            article: { ...out.article, body: `${out.article.body} More at https://evil.example/x` },
+          },
+          meta,
+        };
       case "markup":
-        return { raw: { ...out, headline: `<b>${out.headline}</b>` }, meta };
+        return {
+          raw: { ...out, article: { ...out.article, headline: `<b>${out.article.headline}</b>` } },
+          meta,
+        };
       case "ungrounded":
-        return { raw: { ...out, article: `${out.article} Later, Beyoncé joined them in Paris.` }, meta };
+        return {
+          raw: {
+            ...out,
+            article: { ...out.article, body: `${out.article.body} Later, Beyoncé joined them in Paris.` },
+          },
+          meta,
+        };
       case "too_long":
-        return { raw: { ...out, headline: "word ".repeat(60) }, meta };
+        return { raw: { ...out, article: { ...out.article, headline: "word ".repeat(60) } }, meta };
+      case "bad_refs":
+        return {
+          raw: {
+            ...out,
+            comic: out.comic && { ...out.comic, panels: panels.map((p) => ({ ...p, characters: ["p99"] })) },
+          },
+          meta,
+        };
+      case "scene_text":
+        return {
+          raw: {
+            ...out,
+            comic: out.comic && {
+              ...out.comic,
+              panels: panels.map((p) => ({ ...p, scene: 'a banner reading "WIN"' })),
+            },
+          },
+          meta,
+        };
       default:
         return { raw: JSON.stringify(out), meta };
     }
@@ -143,7 +223,9 @@ export class StubProvider implements AiProvider {
         meta,
       };
     }
-    const seed = hash(`${req.task}|${req.style.styleId}|${req.prompt}|${req.seed ?? 0}`);
+    const seed = hash(
+      `${req.task}|${req.style.key}|${req.aspectRatio}|${req.prompt}|${req.references.length}|${req.seed ?? 0}`,
+    );
     return {
       image: { bytes: solidPng([seed[0]!, seed[1]!, seed[2]!]), mimeType: "image/png" as const },
       meta,

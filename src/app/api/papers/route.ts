@@ -7,6 +7,6 @@ export const GET = defineRoute(routes.listPapers, async ({ user }) => ({
 }));
 
 export const POST = defineRoute(routes.createPaper, async ({ user, body }) => {
-  const id = await createPaper(user.id, body.name);
+  const id = await createPaper(user.id, body.name, body.style);
   return { data: { paper: await getPaper(id, "owner") } };
 });

@@ -40,13 +40,11 @@ export const errorDetailSchema = z
 
 export const errorEnvelopeSchema = z
   .strictObject({
-    error: z.strictObject({
-      code: errorCodeSchema,
-      message: z.string().meta({ description: "Generic, user-safe message. Never contains internals." }),
-      requestId: z.string(),
-      details: z.array(errorDetailSchema).optional(),
-      retryAfterSeconds: z.number().int().positive().optional(),
-    }),
+    error: z.string().meta({ description: "User-safe message to show. Never contains internals." }),
+    code: errorCodeSchema,
+    requestId: z.string(),
+    details: z.array(errorDetailSchema).optional(),
+    retryAfterSeconds: z.number().int().positive().optional(),
   })
   .meta({ id: "ErrorEnvelope" });
 

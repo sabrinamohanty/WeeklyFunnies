@@ -53,10 +53,20 @@ export interface GroundingIssue {
   at: number;
 }
 
-export function findUngrounded(output: string, input: string, allowed: string[] = []): GroundingIssue[] {
+export function findUngrounded(
+  output: string,
+  input: string,
+  allowed: string[] = [],
+  opts: { ignoreSentenceStart?: boolean } = {},
+): GroundingIssue[] {
   const source = fold(input);
   const sourceWords = wordsOf(input);
-  const allow = new Set(allowed.filter(Boolean).map(stem));
+  const allow = new Set(
+    allowed
+      .flatMap((a) => a.split(/\s+/))
+      .filter(Boolean)
+      .map(stem),
+  );
   const issues: GroundingIssue[] = [];
 
   for (const m of output.matchAll(CAPITALIZED)) {
@@ -64,7 +74,7 @@ export function findUngrounded(output: string, input: string, allowed: string[] 
     if (!word || allow.has(word) || word === "i" || /^i['’]/.test(word)) continue;
     if (sourceWords.has(word)) continue;
     const atStart = SENTENCE_START.test(output.slice(0, m.index));
-    if (atStart && OPENERS.has(word)) continue;
+    if (atStart && (opts.ignoreSentenceStart || OPENERS.has(word))) continue;
     issues.push({ kind: "name", at: m.index });
   }
 
@@ -74,7 +84,7 @@ export function findUngrounded(output: string, input: string, allowed: string[] 
     for (const part of m[0].split(/[.,:/]/)) sourceNumbers.add(part);
   }
   for (const m of output.matchAll(NUMBER)) {
-    if (!sourceNumbers.has(m[0])) issues.push({ kind: "number", at: m.index });
+    if (!sourceNumbers.has(m[0]) && !allow.has(m[0])) issues.push({ kind: "number", at: m.index });
   }
   return issues;
 }
