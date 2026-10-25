@@ -89,3 +89,45 @@ describe("OpenAPI document", () => {
     expect(readFileSync(join(ROOT, "docs/openapi.yaml"), "utf8")).toBe(expected);
   });
 });
+
+describe("schemas added for the frontend", () => {
+  it("weather takes both coordinates or neither, within range", async () => {
+    const { weatherQuerySchema } = await import("@/lib/contract/weather");
+    expect(weatherQuerySchema.parse({})).toEqual({});
+    expect(weatherQuerySchema.parse({ lat: "5.6", lon: "-0.19" })).toEqual({ lat: 5.6, lon: -0.19 });
+    for (const bad of [
+      { lat: "5.6" },
+      { lat: "91", lon: "0" },
+      { lat: "0", lon: "181" },
+      { lat: "x", lon: "0" },
+    ]) {
+      expect(weatherQuerySchema.safeParse(bad).success).toBe(false);
+    }
+  });
+
+  it("panel index is 0 to 3 and panel order is a permutation", async () => {
+    const { pagePanelParams, reorderPanelsRequestSchema } = await import("@/lib/contract/pages");
+    const pageId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    expect(pagePanelParams.parse({ pageId, index: "3" }).index).toBe(3);
+    expect(pagePanelParams.safeParse({ pageId, index: "4" }).success).toBe(false);
+    expect(reorderPanelsRequestSchema.parse({ order: [3, 2, 1, 0] }).order).toEqual([3, 2, 1, 0]);
+    for (const order of [
+      [0, 0, 1, 2],
+      [0, 1, 2],
+      [0, 1, 2, 4],
+    ]) {
+      expect(reorderPanelsRequestSchema.safeParse({ order }).success).toBe(false);
+    }
+  });
+
+  it("a page links to 1 to 10 papers, without duplicates", async () => {
+    const { setPagePapersRequestSchema } = await import("@/lib/contract/pages");
+    const id = (n: number) => `aaaaaaaa-aaaa-4aaa-8aaa-${String(n).padStart(12, "0")}`;
+    expect(setPagePapersRequestSchema.safeParse({ paperIds: [] }).success).toBe(false);
+    expect(
+      setPagePapersRequestSchema.safeParse({ paperIds: Array.from({ length: 11 }, (_, i) => id(i)) }).success,
+    ).toBe(false);
+    expect(setPagePapersRequestSchema.safeParse({ paperIds: [id(1), id(1)] }).success).toBe(false);
+    expect(setPagePapersRequestSchema.safeParse({ paperIds: [id(1)] }).success).toBe(true);
+  });
+});

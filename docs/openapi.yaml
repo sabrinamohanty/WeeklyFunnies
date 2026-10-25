@@ -2,7 +2,7 @@
 openapi: 3.1.0
 info:
   title: Meanwhile API
-  version: 0.2.0
+  version: 0.5.0
   description: Backend API for the Meanwhile iOS app. Generated from src/lib/contract. See docs/api-contract.md.
 servers:
   - url: http://localhost:3000
@@ -32,45 +32,39 @@ components:
       type: object
       properties:
         error:
-          type: object
-          properties:
-            code:
-              type: string
-              enum:
-                - bad_request
-                - unauthorized
-                - forbidden
-                - not_found
-                - method_not_allowed
-                - conflict
-                - edition_locked
-                - payload_too_large
-                - unsupported_media
-                - content_blocked
-                - rate_limited
-                - quota_exceeded
-                - internal
-                - not_implemented
-                - provider_unavailable
-            message:
-              type: string
-              description: Generic, user-safe message. Never contains internals.
-            requestId:
-              type: string
-            details:
-              type: array
-              items:
-                $ref: "#/components/schemas/ErrorDetail"
-            retryAfterSeconds:
-              type: integer
-              exclusiveMinimum: 0
-          required:
-            - code
-            - message
-            - requestId
-          additionalProperties: false
+          type: string
+          description: User-safe message to show. Never contains internals.
+        code:
+          type: string
+          enum:
+            - bad_request
+            - unauthorized
+            - forbidden
+            - not_found
+            - method_not_allowed
+            - conflict
+            - edition_locked
+            - payload_too_large
+            - unsupported_media
+            - content_blocked
+            - rate_limited
+            - quota_exceeded
+            - internal
+            - not_implemented
+            - provider_unavailable
+        requestId:
+          type: string
+        details:
+          type: array
+          items:
+            $ref: "#/components/schemas/ErrorDetail"
+        retryAfterSeconds:
+          type: integer
+          exclusiveMinimum: 0
       required:
         - error
+        - code
+        - requestId
       additionalProperties: false
     ErrorDetail:
       type: object
@@ -105,15 +99,22 @@ components:
           description: Only ever returned to its owner.
         zodiacSign:
           $ref: "#/components/schemas/ZodiacSign"
+        style:
+          $ref: "#/components/schemas/StyleKey"
+        look:
+          type:
+            - string
+            - "null"
+          description: Fixed character description built from the trait form, reused in every panel.
         avatarUrl:
           type:
             - string
             - "null"
           format: uri
-          description: Short-lived signed URL. Do not cache past urlsExpireAt.
+          description: Your avatar in your current style, if one exists.
         onboarded:
           type: boolean
-          description: True once name, city, birthday, and an approved avatar exist.
+          description: True once name, city, birthday, and an avatar in your style exist.
         createdAt:
           type: string
           format: date-time
@@ -124,6 +125,8 @@ components:
         - city
         - birthday
         - zodiacSign
+        - style
+        - look
         - avatarUrl
         - onboarded
         - createdAt
@@ -168,6 +171,14 @@ components:
         - aquarius
         - pisces
         - null
+    StyleKey:
+      type: string
+      enum:
+        - classic
+        - manga
+        - sketch
+        - superhero
+      description: Art style preset. Each person picks one; their avatar and comic strip use it.
     UpdateProfileRequest:
       type: object
       properties:
@@ -184,6 +195,14 @@ components:
           type: string
           format: date
           description: Calendar date, YYYY-MM-DD.
+        style:
+          type: string
+          enum:
+            - classic
+            - manga
+            - sketch
+            - superhero
+          description: Art style for your avatar and comic strip. Changing it needs a new avatar (POST /api/avatar).
       additionalProperties: false
     GeocodeResults:
       type: object
@@ -239,125 +258,272 @@ components:
     AvatarState:
       type: object
       properties:
-        approvedUrl:
+        style:
+          $ref: "#/components/schemas/StyleKey"
+        look:
           type:
             - string
             - "null"
-          format: uri
-          description: The current approved avatar, if any.
-        draft:
+          description: The stored look text, built from the traits.
+        traits:
           type:
             - object
             - "null"
           properties:
-            status:
-              $ref: "#/components/schemas/GenerationStatus"
-            url:
-              type:
-                - string
-                - "null"
-              format: uri
-              description: Short-lived signed URL. Do not cache past urlsExpireAt.
-            error:
-              $ref: "#/components/schemas/GenerationError"
-            attempts:
-              type: integer
-              minimum: 0
-            selfieExpiresAt:
+            hairStyle:
               type: string
-              format: date-time
-              description: The selfie is deleted at approval or at this time, whichever comes first.
-          required:
-            - status
-            - url
-            - error
-            - attempts
-            - selfieExpiresAt
+              enum:
+                - short
+                - medium
+                - long
+                - wavy
+                - curly
+                - coily
+                - braids
+                - locs
+                - buzzed
+                - bald
+            hairColor:
+              type: string
+              enum:
+                - black
+                - dark_brown
+                - brown
+                - auburn
+                - red
+                - blonde
+                - gray
+                - white
+                - dyed
+            skinTone:
+              type: string
+              enum:
+                - very_light
+                - light
+                - medium
+                - tan
+                - brown
+                - dark
+            facialHair:
+              type: string
+              enum:
+                - none
+                - stubble
+                - mustache
+                - beard
+            glasses:
+              type: string
+              enum:
+                - none
+                - round
+                - square
+                - sunglasses
+            headwear:
+              type: string
+              enum:
+                - none
+                - cap
+                - beanie
+                - headwrap
+                - hijab
+                - turban
+            top:
+              type: string
+              enum:
+                - tshirt
+                - hoodie
+                - sweater
+                - jacket
+                - shirt
+                - dress
+                - jersey
+            topColor:
+              type: string
+              enum:
+                - red
+                - orange
+                - yellow
+                - green
+                - blue
+                - purple
+                - pink
+                - black
+                - white
+                - gray
+                - brown
+            note:
+              type: string
+              minLength: 1
+              maxLength: 80
+              description: Short free-text detail, e.g. 'freckles'. Moderated and treated as untrusted data. Plain text, 1 to 80 characters after cleaning.
           additionalProperties: false
+          description: The last submitted trait form, to prefill it.
+        avatarUrl:
+          type:
+            - string
+            - "null"
+          format: uri
+          description: Your avatar in your current style.
       required:
-        - approvedUrl
-        - draft
+        - style
+        - look
+        - traits
+        - avatarUrl
       additionalProperties: false
-    GenerationStatus:
-      type: string
-      enum:
-        - pending
-        - generating
-        - ready
-        - failed
-    GenerationError:
-      type:
-        - string
-        - "null"
-      enum:
-        - generation_failed
-        - content_blocked
-        - provider_unavailable
-        - null
-    AvatarUpload:
+    CreateAvatarResponse:
       type: object
       properties:
-        selfie:
+        avatarUrl:
+          type: string
+          format: uri
+          description: Short-lived signed URL. Do not cache past urlsExpireAt.
+        style:
+          $ref: "#/components/schemas/StyleKey"
+        look:
+          type: string
+      required:
+        - avatarUrl
+        - style
+        - look
+      additionalProperties: false
+    CreateAvatarRequest:
+      type: object
+      properties:
+        style:
+          type: string
+          enum:
+            - classic
+            - manga
+            - sketch
+            - superhero
+          description: When sent, becomes your style before drawing. Defaults to your current style.
+        traits:
+          type: object
+          properties:
+            hairStyle:
+              type: string
+              enum:
+                - short
+                - medium
+                - long
+                - wavy
+                - curly
+                - coily
+                - braids
+                - locs
+                - buzzed
+                - bald
+            hairColor:
+              type: string
+              enum:
+                - black
+                - dark_brown
+                - brown
+                - auburn
+                - red
+                - blonde
+                - gray
+                - white
+                - dyed
+            skinTone:
+              type: string
+              enum:
+                - very_light
+                - light
+                - medium
+                - tan
+                - brown
+                - dark
+            facialHair:
+              type: string
+              enum:
+                - none
+                - stubble
+                - mustache
+                - beard
+            glasses:
+              type: string
+              enum:
+                - none
+                - round
+                - square
+                - sunglasses
+            headwear:
+              type: string
+              enum:
+                - none
+                - cap
+                - beanie
+                - headwrap
+                - hijab
+                - turban
+            top:
+              type: string
+              enum:
+                - tshirt
+                - hoodie
+                - sweater
+                - jacket
+                - shirt
+                - dress
+                - jersey
+            topColor:
+              type: string
+              enum:
+                - red
+                - orange
+                - yellow
+                - green
+                - blue
+                - purple
+                - pink
+                - black
+                - white
+                - gray
+                - brown
+            note:
+              type: string
+              minLength: 1
+              maxLength: 80
+              description: Short free-text detail, e.g. 'freckles'. Moderated and treated as untrusted data. Plain text, 1 to 80 characters after cleaning.
+          additionalProperties: false
+          description: When sent, replaces the trait form; the server rebuilds and stores the look first.
+        photoUrl:
+          type: string
+          maxLength: 2048
+          format: uri
+          description: A photoUrl returned by POST /api/avatar/photo for this user. Any other URL is rejected; the server never fetches URLs.
+      additionalProperties: false
+      description: Needs a stored look or traits in this request. An empty body redraws in your current style.
+    AvatarPhotoResponse:
+      type: object
+      properties:
+        photoUrl:
+          type: string
+          format: uri
+          description: Pass to POST /api/avatar. Short-lived.
+        expiresAt:
+          type: string
+          format: date-time
+          description: The photo is deleted at this time (at most 1 hour).
+      required:
+        - photoUrl
+        - expiresAt
+      additionalProperties: false
+    AvatarPhotoUpload:
+      type: object
+      properties:
+        photo:
           type: string
           format: binary
-          description: JPEG or PNG, at most 12 MB.
-        tweaks:
-          type: string
-          description: Optional JSON-encoded AvatarTweaks.
-      additionalProperties: false
-    RegenerateAvatarRequest:
-      type: object
-      properties:
-        tweaks:
-          $ref: "#/components/schemas/AvatarTweaks"
-      additionalProperties: false
-    AvatarTweaks:
-      type: object
-      properties:
-        hairStyle:
+          description: JPEG or PNG of the person, at most 12 MB. Moderated. Only used for their own avatar.
+        photoConsent:
           type: string
           enum:
-            - short
-            - medium
-            - long
-            - curly
-            - coily
-            - braids
-            - locs
-            - bald
-        hairColor:
-          type: string
-          enum:
-            - black
-            - brown
-            - blonde
-            - red
-            - gray
-            - white
-            - dyed
-        facialHair:
-          type: string
-          enum:
-            - none
-            - stubble
-            - mustache
-            - beard
-        glasses:
-          type: boolean
-        headwear:
-          type: string
-          enum:
-            - none
-            - cap
-            - beanie
-            - headwrap
-            - hijab
-            - turban
-        note:
-          type: string
-          minLength: 1
-          maxLength: 80
-          description: Short free-text tweak. Moderated and treated as untrusted data. Plain text, 1 to 80 characters after cleaning.
+            - "true"
+          description: 'Must be "true": the person agrees to their photo being used for their avatar.'
+      required:
+        - photoConsent
       additionalProperties: false
     Paper:
       type: object
@@ -376,6 +542,7 @@ components:
         memberCount:
           type: integer
           minimum: 0
+          maximum: 8
         createdAt:
           type: string
           format: date-time
@@ -415,6 +582,7 @@ components:
         memberCount:
           type: integer
           minimum: 0
+          maximum: 8
         createdAt:
           type: string
           format: date-time
@@ -454,7 +622,7 @@ components:
             - string
             - "null"
           format: uri
-          description: Short-lived signed URL. Do not cache past urlsExpireAt.
+          description: The member's avatar in their own style, if any.
         role:
           $ref: "#/components/schemas/Role"
         joinedAt:
@@ -486,6 +654,7 @@ components:
       required:
         - name
       additionalProperties: false
+      description: Owner only.
     Invite:
       type: object
       properties:
@@ -554,7 +723,7 @@ components:
         code:
           type: string
           maxLength: 32
-          description: Invite code. Case-insensitive; spaces and dashes are ignored.
+          description: Invite code. Case-insensitive; spaces and dashes are ignored, O reads as 0, I and L as 1.
       required:
         - code
       additionalProperties: false
@@ -567,6 +736,10 @@ components:
         paperId:
           type: string
           format: uuid
+        issueNumber:
+          type: integer
+          exclusiveMinimum: 0
+          description: 1 for the paper's first edition.
         weekStart:
           type: string
           format: date
@@ -575,6 +748,10 @@ components:
           type: string
           format: date
           description: Sunday, in the paper owner's timezone.
+        deadline:
+          type: string
+          format: date-time
+          description: Sunday 11:59 p.m. in the owner's timezone. Pages lock then; the owner publishes after.
         status:
           $ref: "#/components/schemas/EditionStatus"
         publishedAt:
@@ -588,15 +765,24 @@ components:
             - string
             - "null"
           format: date-time
-          description: "Set at publish: publishedAt + retention days."
+          description: "When it will be deleted: publishedAt + 14 days. Null while a draft or while saved."
+        savedAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+          description: Set when the owner saves it to keep forever.
       required:
         - id
         - paperId
+        - issueNumber
         - weekStart
         - weekEnd
+        - deadline
         - status
         - publishedAt
         - expiresAt
+        - savedAt
       additionalProperties: false
     EditionStatus:
       type: string
@@ -615,6 +801,10 @@ components:
             paperId:
               type: string
               format: uuid
+            issueNumber:
+              type: integer
+              exclusiveMinimum: 0
+              description: 1 for the paper's first edition.
             weekStart:
               type: string
               format: date
@@ -623,6 +813,10 @@ components:
               type: string
               format: date
               description: Sunday, in the paper owner's timezone.
+            deadline:
+              type: string
+              format: date-time
+              description: Sunday 11:59 p.m. in the owner's timezone. Pages lock then; the owner publishes after.
             status:
               $ref: "#/components/schemas/EditionStatus"
             publishedAt:
@@ -636,17 +830,26 @@ components:
                 - string
                 - "null"
               format: date-time
-              description: "Set at publish: publishedAt + retention days."
+              description: "When it will be deleted: publishedAt + 14 days. Null while a draft or while saved."
+            savedAt:
+              type:
+                - string
+                - "null"
+              format: date-time
+              description: Set when the owner saves it to keep forever.
             paperName:
               type: string
           required:
             - id
             - paperId
+            - issueNumber
             - weekStart
             - weekEnd
+            - deadline
             - status
             - publishedAt
             - expiresAt
+            - savedAt
             - paperName
           additionalProperties: false
         viewer:
@@ -677,12 +880,14 @@ components:
                   - "null"
               zodiacSign:
                 $ref: "#/components/schemas/ZodiacSign"
+              style:
+                $ref: "#/components/schemas/StyleKey"
               avatarUrl:
                 type:
                   - string
                   - "null"
                 format: uri
-                description: Short-lived signed URL. Do not cache past urlsExpireAt.
+                description: In the member's own style.
               role:
                 $ref: "#/components/schemas/Role"
             required:
@@ -690,20 +895,19 @@ components:
               - name
               - city
               - zodiacSign
+              - style
               - avatarUrl
               - role
             additionalProperties: false
-        myEvents:
+        progress:
           type: array
           items:
-            $ref: "#/components/schemas/OwnEvent"
-          description: The viewer's own events in this edition, with review fields.
-        strips:
+            $ref: "#/components/schemas/Progress"
+        pages:
           type: array
           items:
-            $ref: "#/components/schemas/Strip"
-        weather:
-          $ref: "#/components/schemas/Weather"
+            $ref: "#/components/schemas/PublishedPage"
+          description: "Published editions: every approved page, in a stable shuffled order. Drafts: empty; use GET /api/pages/current for your own page."
         horoscopes:
           type: array
           items:
@@ -713,14 +917,20 @@ components:
                 $ref: "#/components/schemas/ZodiacSign"
               text:
                 type: string
+              luckyNumber:
+                type: integer
+                minimum: 1
+                maximum: 99
               userIds:
                 type: array
                 items:
                   type: string
                   format: uuid
+                description: Members with this sign.
             required:
               - sign
               - text
+              - luckyNumber
               - userIds
             additionalProperties: false
         birthdays:
@@ -736,7 +946,7 @@ components:
               monthDay:
                 type: string
                 pattern: ^\d{2}-\d{2}$
-                description: MM-DD. The year is never sent.
+                description: MM-DD. The year and age are never sent.
             required:
               - userId
               - name
@@ -750,83 +960,208 @@ components:
         - edition
         - viewer
         - members
-        - myEvents
-        - strips
-        - weather
+        - progress
+        - pages
         - horoscopes
         - birthdays
         - urlsExpireAt
       additionalProperties: false
-    OwnEvent:
+    Progress:
+      type: object
+      properties:
+        userId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum:
+            - not_started
+            - in_progress
+            - approved
+      required:
+        - userId
+        - status
+      additionalProperties: false
+      description: Each member's page status for this edition. No content.
+    PublishedPage:
+      type: object
+      properties:
+        pageId:
+          type: string
+          format: uuid
+        authorId:
+          type: string
+          format: uuid
+          description: Matches a userId in members.
+        style:
+          $ref: "#/components/schemas/StyleKey"
+        stories:
+          type: array
+          items:
+            $ref: "#/components/schemas/PublishedStory"
+        comic:
+          $ref: "#/components/schemas/Comic"
+      required:
+        - pageId
+        - authorId
+        - style
+        - stories
+        - comic
+      additionalProperties: false
+    PublishedStory:
       type: object
       properties:
         id:
           type: string
           format: uuid
-        editionId:
+        highlightId:
           type: string
           format: uuid
-        userId:
-          type: string
-          format: uuid
+        section:
+          $ref: "#/components/schemas/StorySection"
         headline:
           type: string
-        article:
+          description: At most 120 characters.
+        body:
           type: string
-        serious:
-          type: boolean
-        inComic:
-          type: boolean
-        position:
-          type: integer
-          minimum: 0
-        panel:
-          $ref: "#/components/schemas/Panel"
+          description: One to three sentences, plain text.
         photos:
           type: array
           items:
-            $ref: "#/components/schemas/Photo"
+            type: string
+            format: uri
+            description: Short-lived signed URL. Do not cache past urlsExpireAt.
           maxItems: 4
-        sourceText:
-          type: string
-          description: What the author wrote. Only returned to the author.
-        approved:
-          type: boolean
-        notices:
-          type: array
-          items:
-            $ref: "#/components/schemas/EventNotice"
-        createdAt:
-          type: string
-          format: date-time
-          description: ISO 8601 timestamp.
-        updatedAt:
-          type: string
-          format: date-time
-          description: ISO 8601 timestamp.
-        expiresAt:
-          type: string
-          format: date-time
-          description: ISO 8601 timestamp.
+          description: The highlight's photos. Show a count badge and open them in the lightbox.
+        reactions:
+          $ref: "#/components/schemas/ReactionCounts"
+        myReaction:
+          $ref: "#/components/schemas/Reaction"
       required:
         - id
-        - editionId
-        - userId
+        - highlightId
+        - section
         - headline
-        - article
-        - serious
-        - inComic
-        - position
-        - panel
+        - body
         - photos
-        - sourceText
-        - approved
-        - notices
-        - createdAt
-        - updatedAt
-        - expiresAt
+        - reactions
+        - myReaction
+      additionalProperties: false
+    StorySection:
+      type: string
+      enum:
+        - news
+        - sports
+        - pets
+        - campus
+        - work
+        - food
+        - travel
+        - arts
+        - family
+        - home
+        - outdoors
+        - milestones
+      description: Section label for the story's kicker. Capitalize it for display.
+    ReactionCounts:
+      type: object
+      properties:
+        ha:
+          type: integer
+          minimum: 0
+        aww:
+          type: integer
+          minimum: 0
+        hooray:
+          type: integer
+          minimum: 0
+      required:
+        - ha
+        - aww
+        - hooray
+      additionalProperties: false
+      description: Counts from members of this edition's paper only.
+    Reaction:
+      type:
+        - string
+        - "null"
+      enum:
+        - ha
+        - aww
+        - hooray
+        - null
+    Comic:
+      type:
+        - object
+        - "null"
+      properties:
+        title:
+          type: string
+        panels:
+          type: array
+          items:
+            $ref: "#/components/schemas/Panel"
+          description: In display order.
+      required:
+        - title
+        - panels
       additionalProperties: false
     Panel:
+      type: object
+      properties:
+        index:
+          type: integer
+          minimum: 0
+          maximum: 3
+        caption:
+          type:
+            - string
+            - "null"
+          description: At most 15 words. Overlaid by the client.
+        dialogue:
+          type: array
+          items:
+            $ref: "#/components/schemas/DialogueLine"
+          maxItems: 2
+        highlightId:
+          type: string
+          format: uuid
+          description: The highlight this panel shows.
+        image:
+          $ref: "#/components/schemas/PanelImage"
+        photos:
+          type: array
+          items:
+            type: string
+            format: uri
+            description: Short-lived signed URL. Do not cache past urlsExpireAt.
+          maxItems: 4
+          description: Real photos from the panel's highlight. Show a count badge when nonzero.
+      required:
+        - index
+        - caption
+        - dialogue
+        - highlightId
+        - image
+        - photos
+      additionalProperties: false
+    DialogueLine:
+      type: object
+      properties:
+        text:
+          type: string
+          description: At most 12 words. Rendered by the client as an overlaid bubble.
+        side:
+          type: string
+          enum:
+            - left
+            - right
+      required:
+        - text
+        - side
+      additionalProperties: false
+      description: Spoken by the page's author.
+    PanelImage:
       type: object
       properties:
         status:
@@ -844,13 +1179,142 @@ components:
         - url
         - error
       additionalProperties: false
+      description: Show a loading state while pending or generating, and a retry on failed.
+    GenerationStatus:
+      type: string
+      enum:
+        - pending
+        - generating
+        - ready
+        - failed
+    GenerationError:
+      type:
+        - string
+        - "null"
+      enum:
+        - generation_failed
+        - content_blocked
+        - provider_unavailable
+        - null
+    SaveEditionRequest:
+      type: object
+      properties:
+        saved:
+          type: boolean
+          description: true keeps it forever; false restores the 14-day expiry.
+      required:
+        - saved
+      additionalProperties: false
+    ReactionResult:
+      type: object
+      properties:
+        reactions:
+          $ref: "#/components/schemas/ReactionCounts"
+        myReaction:
+          $ref: "#/components/schemas/Reaction"
+      required:
+        - reactions
+        - myReaction
+      additionalProperties: false
+    SetReactionRequest:
+      type: object
+      properties:
+        reaction:
+          type:
+            - string
+            - "null"
+          enum:
+            - ha
+            - aww
+            - hooray
+            - null
+          description: null removes your reaction.
+      required:
+        - reaction
+      additionalProperties: false
+    PagePaper:
+      type: object
+      properties:
+        paperId:
+          type: string
+          format: uuid
+        paperName:
+          type: string
+        editionId:
+          type: string
+          format: uuid
+        deadline:
+          type: string
+          format: date-time
+          description: Sunday 11:59 p.m. in that paper owner's timezone.
+      required:
+        - paperId
+        - paperName
+        - editionId
+        - deadline
+      additionalProperties: false
+    PageStatus:
+      type: string
+      enum:
+        - writing
+        - generated
+        - approved
+      description: "writing: highlights only. generated: stories and comic exist. approved: the author signed off; any edit returns it to generated."
+    Highlight:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        pageId:
+          type: string
+          format: uuid
+        text:
+          type: string
+          description: What the author wrote. Only returned to the author.
+        serious:
+          type: boolean
+        inComic:
+          type: boolean
+        position:
+          type: integer
+          minimum: 0
+        photos:
+          type: array
+          items:
+            $ref: "#/components/schemas/Photo"
+          maxItems: 4
+        notices:
+          type: array
+          items:
+            $ref: "#/components/schemas/HighlightNotice"
+        createdAt:
+          type: string
+          format: date-time
+          description: ISO 8601 timestamp.
+        updatedAt:
+          type: string
+          format: date-time
+          description: ISO 8601 timestamp.
+      required:
+        - id
+        - pageId
+        - text
+        - serious
+        - inComic
+        - position
+        - photos
+        - notices
+        - createdAt
+        - updatedAt
+      additionalProperties: false
     Photo:
       type: object
       properties:
         id:
           type: string
           format: uuid
-        eventId:
+        highlightId:
           type: string
           format: uuid
         url:
@@ -869,157 +1333,264 @@ components:
           description: ISO 8601 timestamp.
       required:
         - id
-        - eventId
+        - highlightId
         - url
         - width
         - height
         - createdAt
       additionalProperties: false
-    EventNotice:
+    HighlightNotice:
       type: string
       enum:
-        - fallback_used
         - marked_serious
-      description: "fallback_used: generation failed validation and safe default text was used; edit before approving. marked_serious: moderation flagged the topic as sensitive, so serious was turned on."
-    Strip:
-      type: object
-      properties:
-        userId:
-          type: string
-          format: uuid
-        status:
-          type: string
-          enum:
-            - not_started
-            - in_progress
-            - approved
-        events:
-          type: array
-          items:
-            $ref: "#/components/schemas/BundleEvent"
-          maxItems: 3
-      required:
-        - userId
-        - status
-        - events
-      additionalProperties: false
-      description: "In a draft edition, events is always empty: members see only their own posts (in myEvents) and each other's progress status. Events appear once the edition is published."
-    BundleEvent:
+      description: "marked_serious: moderation flagged the topic as sensitive, so serious was turned on and inComic off. Serious highlights get a gentle story and never appear in the comic."
+    Story:
       type: object
       properties:
         id:
           type: string
           format: uuid
-        editionId:
+        highlightId:
           type: string
           format: uuid
-        userId:
-          type: string
-          format: uuid
+        section:
+          $ref: "#/components/schemas/StorySection"
         headline:
           type: string
-        article:
+          description: At most 120 characters.
+        body:
           type: string
-        serious:
-          type: boolean
-        inComic:
-          type: boolean
-        position:
-          type: integer
-          minimum: 0
-        panel:
-          $ref: "#/components/schemas/Panel"
+          description: One to three sentences, plain text.
         photos:
           type: array
           items:
-            $ref: "#/components/schemas/Photo"
+            type: string
+            format: uri
+            description: Short-lived signed URL. Do not cache past urlsExpireAt.
           maxItems: 4
+          description: The highlight's photos. Show a count badge and open them in the lightbox.
       required:
         - id
-        - editionId
-        - userId
+        - highlightId
+        - section
         - headline
-        - article
-        - serious
-        - inComic
-        - position
-        - panel
+        - body
         - photos
       additionalProperties: false
-    Weather:
-      type:
-        - object
-        - "null"
+    PageNotice:
+      type: string
+      enum:
+        - fallback_used
+        - stale
+      description: "fallback_used: generation failed validation, so safe default text was used; edit or regenerate. stale: highlights changed after generation; regenerate before approving."
+    Page:
+      type: object
       properties:
-        city:
+        id:
           type: string
-        timezone:
+          format: uuid
+        weekStart:
           type: string
-        fetchedAt:
+          format: date
+          description: Monday of the page's week.
+        weekEnd:
+          type: string
+          format: date
+          description: Calendar date, YYYY-MM-DD.
+        deadline:
+          type: string
+          format: date-time
+          description: The earliest deadline among the linked papers.
+        locked:
+          type: boolean
+          description: True once the deadline has passed. Nothing can change.
+        style:
+          type: string
+          enum:
+            - classic
+            - manga
+            - sketch
+            - superhero
+          description: The author's style when the comic was generated.
+        papers:
+          type: array
+          items:
+            $ref: "#/components/schemas/PagePaper"
+          maxItems: 10
+        status:
+          $ref: "#/components/schemas/PageStatus"
+        highlights:
+          type: array
+          items:
+            $ref: "#/components/schemas/Highlight"
+          maxItems: 3
+        stories:
+          type: array
+          items:
+            $ref: "#/components/schemas/Story"
+          maxItems: 3
+          description: In highlight order.
+        comic:
+          type:
+            - object
+            - "null"
+          properties:
+            title:
+              type: string
+            panels:
+              type: array
+              items:
+                $ref: "#/components/schemas/Panel"
+              description: In display order.
+          required:
+            - title
+            - panels
+          additionalProperties: false
+          description: Null before generation, or when every highlight is serious.
+        notices:
+          type: array
+          items:
+            $ref: "#/components/schemas/PageNotice"
+        limits:
+          type: object
+          properties:
+            regenerationsLeft:
+              type: integer
+              minimum: 0
+            rewritesLeft:
+              type: integer
+              minimum: 0
+            redrawsLeft:
+              type: integer
+              minimum: 0
+          required:
+            - regenerationsLeft
+            - rewritesLeft
+            - redrawsLeft
+          additionalProperties: false
+        generatedAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+          description: ISO 8601 timestamp.
+        approvedAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+          description: ISO 8601 timestamp.
+        urlsExpireAt:
           type: string
           format: date-time
           description: ISO 8601 timestamp.
-        days:
-          type: array
-          items:
-            type: object
-            properties:
-              date:
-                type: string
-                format: date
-                description: Calendar date, YYYY-MM-DD.
-              tempMaxC:
-                type: number
-              tempMinC:
-                type: number
-              precipitationChance:
-                type:
-                  - integer
-                  - "null"
-                minimum: 0
-                maximum: 100
-              weatherCode:
-                type: integer
-                description: WMO weather interpretation code.
-              summary:
-                type: string
-                description: Short label for the code, e.g. 'Light rain'.
-            required:
-              - date
-              - tempMaxC
-              - tempMinC
-              - precipitationChance
-              - weatherCode
-              - summary
-            additionalProperties: false
-          maxItems: 7
       required:
-        - city
-        - timezone
-        - fetchedAt
-        - days
+        - id
+        - weekStart
+        - weekEnd
+        - deadline
+        - locked
+        - style
+        - papers
+        - status
+        - highlights
+        - stories
+        - comic
+        - notices
+        - limits
+        - generatedAt
+        - approvedAt
+        - urlsExpireAt
       additionalProperties: false
-      description: 7-day forecast for the reader's own city.
-    ReorderRequest:
+      description: Only ever returned to its author.
+    SetPagePapersRequest:
       type: object
       properties:
-        eventIds:
+        paperIds:
           type: array
           items:
             type: string
             format: uuid
           minItems: 1
-          maxItems: 3
-          description: All of the caller's event ids in this edition, in the new order.
+          maxItems: 10
+          description: Papers you belong to whose current edition is still open.
       required:
-        - eventIds
+        - paperIds
       additionalProperties: false
-    CreateEventRequest:
+    UpdatePageRequest:
       type: object
       properties:
-        editionId:
-          type: string
-          format: uuid
+        stories:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+                format: uuid
+              headline:
+                type: string
+                minLength: 1
+                maxLength: 120
+                description: Plain text, 1 to 120 characters after cleaning.
+              body:
+                type: string
+                minLength: 1
+                maxLength: 600
+                description: Plain text, 1 to 600 characters after cleaning.
+            required:
+              - id
+            additionalProperties: false
+          maxItems: 3
+        comic:
+          type: object
+          properties:
+            title:
+              type: string
+              minLength: 1
+              maxLength: 80
+              description: Plain text, 1 to 80 characters after cleaning.
+            panels:
+              type: array
+              items:
+                type: object
+                properties:
+                  index:
+                    type: integer
+                    minimum: 0
+                    maximum: 3
+                  caption:
+                    type:
+                      - string
+                      - "null"
+                    minLength: 1
+                    maxLength: 120
+                    description: Caption. At most 15 words. Plain text, 1 to 120 characters after cleaning.
+                  dialogue:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        text:
+                          type: string
+                          minLength: 1
+                          maxLength: 100
+                          description: Dialogue line. At most 12 words. Plain text, 1 to 100 characters after cleaning.
+                      required:
+                        - text
+                      additionalProperties: false
+                    maxItems: 2
+                    description: Replaces the text of the existing lines in order; sides are kept.
+                required:
+                  - index
+                additionalProperties: false
+              maxItems: 4
+          additionalProperties: false
+      additionalProperties: false
+      description: Edited text is moderated. Clears approval.
+    CreateHighlightRequest:
+      type: object
+      properties:
         text:
           type: string
           minLength: 1
@@ -1028,31 +1599,70 @@ components:
         serious:
           type: boolean
           default: false
+        inComic:
+          type: boolean
+          default: true
+          description: Ignored (forced off) when serious is true.
       required:
-        - editionId
         - text
       additionalProperties: false
-    UpdateEventRequest:
+    ReorderHighlightsRequest:
       type: object
       properties:
-        headline:
+        highlightIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+          minItems: 1
+          maxItems: 3
+          description: All of the page's highlight ids, in the new order.
+      required:
+        - highlightIds
+      additionalProperties: false
+    GeneratePageRequest:
+      type: object
+      properties:
+        regenerate:
+          type: boolean
+          default: false
+          description: Write new stories and a new comic even if they exist. Resets panel images. Limited.
+      additionalProperties: false
+    DrawPanelRequest:
+      type: object
+      properties:
+        regenerate:
+          type: boolean
+          default: false
+          description: Draw a new image even if one is ready. Counts toward the page and daily caps.
+      additionalProperties: false
+    ReorderPanelsRequest:
+      type: object
+      properties:
+        order:
+          type: array
+          items:
+            type: integer
+            minimum: 0
+            maximum: 3
+          description: Current panel indexes in their new order, e.g. [1, 0, 2, 3].
+      required:
+        - order
+      additionalProperties: false
+    UpdateHighlightRequest:
+      type: object
+      properties:
+        text:
           type: string
           minLength: 1
-          maxLength: 120
-          description: Plain text, 1 to 120 characters after cleaning.
-        article:
-          type: string
-          minLength: 1
-          maxLength: 600
-          description: Plain text, 1 to 600 characters after cleaning.
+          maxLength: 500
+          description: The highlight, in the author's words. Plain text, 1 to 500 characters after cleaning.
         serious:
           type: boolean
         inComic:
           type: boolean
-        approved:
-          type: boolean
       additionalProperties: false
-      description: Editing headline, article, serious, or inComic clears approval unless approved=true is sent too.
+      description: Any change marks a generated page stale and clears its approval.
     Deleted:
       type: object
       properties:
@@ -1067,21 +1677,13 @@ components:
         - id
         - deleted
       additionalProperties: false
-    RequestPanelRequest:
-      type: object
-      properties:
-        regenerate:
-          type: boolean
-          default: false
-          description: Generate a new panel even if one is ready. Counts toward the daily image cap.
-      additionalProperties: false
     PhotoUpload:
       type: object
       properties:
         photo:
           type: string
           format: binary
-          description: JPEG or PNG, at most 12 MB. Re-encoded server-side; all metadata is stripped.
+          description: JPEG or PNG, at most 12 MB. Moderated, re-encoded server-side; all metadata is stripped.
       additionalProperties: false
     LogoutResult:
       type: object
@@ -1124,13 +1726,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  data:
-                    $ref: "#/components/schemas/Health"
-                required:
-                  - data
-                additionalProperties: false
+                $ref: "#/components/schemas/Health"
         "500":
           description: internal
           content:
@@ -1154,16 +1750,10 @@ paths:
               schema:
                 type: object
                 properties:
-                  data:
-                    type: object
-                    properties:
-                      profile:
-                        $ref: "#/components/schemas/Profile"
-                    required:
-                      - profile
-                    additionalProperties: false
+                  profile:
+                    $ref: "#/components/schemas/Profile"
                 required:
-                  - data
+                  - profile
                 additionalProperties: false
         "401":
           description: unauthorized
@@ -1205,16 +1795,10 @@ paths:
               schema:
                 type: object
                 properties:
-                  data:
-                    type: object
-                    properties:
-                      profile:
-                        $ref: "#/components/schemas/Profile"
-                    required:
-                      - profile
-                    additionalProperties: false
+                  profile:
+                    $ref: "#/components/schemas/Profile"
                 required:
-                  - data
+                  - profile
                 additionalProperties: false
         "400":
           description: bad_request
@@ -1271,12 +1855,152 @@ paths:
           content:
             application/json:
               schema:
+                $ref: "#/components/schemas/GeocodeResults"
+        "400":
+          description: bad_request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "401":
+          description: unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "429":
+          description: rate_limited
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "500":
+          description: internal
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "503":
+          description: provider_unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /api/weather:
+    get:
+      operationId: getWeather
+      summary: 7-day forecast for the browser's location if given (rounded, never stored), else the profile city.
+      tags:
+        - profile
+      security:
+        - supabaseJwt: []
+      x-phase: 5
+      parameters:
+        - schema:
+            type: string
+            maxLength: 20
+            pattern: ^-?\d{1,3}(\.\d+)?$
+          required: false
+          name: lat
+          in: query
+        - schema:
+            type: string
+            maxLength: 20
+            pattern: ^-?\d{1,3}(\.\d+)?$
+          required: false
+          name: lon
+          in: query
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema:
                 type: object
                 properties:
-                  data:
-                    $ref: "#/components/schemas/GeocodeResults"
+                  weather:
+                    type:
+                      - object
+                      - "null"
+                    properties:
+                      source:
+                        type: string
+                        enum:
+                          - location
+                          - profile_city
+                      place:
+                        type:
+                          - string
+                          - "null"
+                        description: The profile city's name. Null for browser location; label it on the client.
+                      timezone:
+                        type: string
+                      fetchedAt:
+                        type: string
+                        format: date-time
+                        description: ISO 8601 timestamp.
+                      current:
+                        type:
+                          - object
+                          - "null"
+                        properties:
+                          tempC:
+                            type: number
+                          weatherCode:
+                            type: integer
+                            description: WMO weather interpretation code.
+                          summary:
+                            type: string
+                        required:
+                          - tempC
+                          - weatherCode
+                          - summary
+                        additionalProperties: false
+                      days:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            date:
+                              type: string
+                              format: date
+                              description: Calendar date, YYYY-MM-DD.
+                            tempMaxC:
+                              type: number
+                            tempMinC:
+                              type: number
+                            precipitationChance:
+                              type:
+                                - integer
+                                - "null"
+                              minimum: 0
+                              maximum: 100
+                            weatherCode:
+                              type: integer
+                              description: WMO weather interpretation code.
+                            summary:
+                              type: string
+                              description: Short label for the code, e.g. 'Light rain'.
+                          required:
+                            - date
+                            - tempMaxC
+                            - tempMinC
+                            - precipitationChance
+                            - weatherCode
+                            - summary
+                          additionalProperties: false
+                        maxItems: 7
+                    required:
+                      - source
+                      - place
+                      - timezone
+                      - fetchedAt
+                      - current
+                      - days
+                    additionalProperties: false
+                    description: Null when there's no location and no profile city.
                 required:
-                  - data
+                  - weather
                 additionalProperties: false
         "400":
           description: bad_request
@@ -1311,7 +2035,7 @@ paths:
   /api/avatar:
     get:
       operationId: getAvatar
-      summary: Get the approved avatar and any in-progress draft. Poll while draft.status is generating.
+      summary: Get the caller's style, look, trait form, and avatar.
       tags:
         - avatar
       security:
@@ -1323,19 +2047,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  data:
-                    type: object
-                    properties:
-                      avatar:
-                        $ref: "#/components/schemas/AvatarState"
-                    required:
-                      - avatar
-                    additionalProperties: false
-                required:
-                  - data
-                additionalProperties: false
+                $ref: "#/components/schemas/AvatarState"
         "401":
           description: unauthorized
           content:
@@ -1355,84 +2067,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
     post:
-      operationId: uploadSelfie
-      summary: Upload a selfie and start avatar generation. Returns immediately.
-      tags:
-        - avatar
-      security:
-        - supabaseJwt: []
-      x-phase: 4
-      requestBody:
-        required: true
-        content:
-          multipart/form-data:
-            schema:
-              $ref: "#/components/schemas/AvatarUpload"
-      responses:
-        "202":
-          description: Accepted. Poll the status field.
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    type: object
-                    properties:
-                      avatar:
-                        $ref: "#/components/schemas/AvatarState"
-                    required:
-                      - avatar
-                    additionalProperties: false
-                required:
-                  - data
-                additionalProperties: false
-        "400":
-          description: bad_request
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorEnvelope"
-        "401":
-          description: unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorEnvelope"
-        "413":
-          description: payload_too_large
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorEnvelope"
-        "415":
-          description: unsupported_media
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorEnvelope"
-        "429":
-          description: quota_exceeded, rate_limited
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorEnvelope"
-        "500":
-          description: internal
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorEnvelope"
-        "503":
-          description: provider_unavailable
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorEnvelope"
-  /api/avatar/regenerate:
-    post:
-      operationId: regenerateAvatar
-      summary: Regenerate the draft avatar from the retained selfie, optionally with tweaks.
+      operationId: createAvatar
+      summary: Draw the caller's avatar in their style (optionally switching style first), from their stored look or new traits, and optionally their photo. Waits for the image. Calling again redraws (capped).
       tags:
         - avatar
       security:
@@ -1443,26 +2079,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/RegenerateAvatarRequest"
+              $ref: "#/components/schemas/CreateAvatarRequest"
       responses:
-        "202":
-          description: Accepted. Poll the status field.
+        "200":
+          description: Success.
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  data:
-                    type: object
-                    properties:
-                      avatar:
-                        $ref: "#/components/schemas/AvatarState"
-                    required:
-                      - avatar
-                    additionalProperties: false
-                required:
-                  - data
-                additionalProperties: false
+                $ref: "#/components/schemas/CreateAvatarResponse"
         "400":
           description: bad_request
           content:
@@ -1471,6 +2095,12 @@ paths:
                 $ref: "#/components/schemas/ErrorEnvelope"
         "401":
           description: unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "403":
+          description: forbidden
           content:
             application/json:
               schema:
@@ -1505,50 +2135,54 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
-  /api/avatar/approve:
+  /api/avatar/photo:
     post:
-      operationId: approveAvatar
-      summary: Approve the ready draft avatar. Deletes the selfie.
+      operationId: uploadAvatarPhoto
+      summary: Upload a photo for your own avatar, with consent. Moderated, re-encoded, metadata stripped, and deleted within an hour. Returns a photoUrl for POST /api/avatar.
       tags:
         - avatar
       security:
         - supabaseJwt: []
       x-phase: 4
       requestBody:
-        required: false
+        required: true
         content:
-          application/json:
+          multipart/form-data:
             schema:
-              type: object
-              properties: {}
-              additionalProperties: false
+              $ref: "#/components/schemas/AvatarPhotoUpload"
       responses:
-        "200":
+        "201":
           description: Success.
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  data:
-                    type: object
-                    properties:
-                      avatar:
-                        $ref: "#/components/schemas/AvatarState"
-                    required:
-                      - avatar
-                    additionalProperties: false
-                required:
-                  - data
-                additionalProperties: false
+                $ref: "#/components/schemas/AvatarPhotoResponse"
+        "400":
+          description: bad_request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
         "401":
           description: unauthorized
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
-        "409":
-          description: conflict
+        "413":
+          description: payload_too_large
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "415":
+          description: unsupported_media
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "422":
+          description: content_blocked
           content:
             application/json:
               schema:
@@ -1582,18 +2216,12 @@ paths:
               schema:
                 type: object
                 properties:
-                  data:
-                    type: object
-                    properties:
-                      papers:
-                        type: array
-                        items:
-                          $ref: "#/components/schemas/Paper"
-                    required:
-                      - papers
-                    additionalProperties: false
+                  papers:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Paper"
                 required:
-                  - data
+                  - papers
                 additionalProperties: false
         "401":
           description: unauthorized
@@ -1635,16 +2263,10 @@ paths:
               schema:
                 type: object
                 properties:
-                  data:
-                    type: object
-                    properties:
-                      paper:
-                        $ref: "#/components/schemas/Paper"
-                    required:
-                      - paper
-                    additionalProperties: false
+                  paper:
+                    $ref: "#/components/schemas/Paper"
                 required:
-                  - data
+                  - paper
                 additionalProperties: false
         "400":
           description: bad_request
@@ -1694,16 +2316,10 @@ paths:
               schema:
                 type: object
                 properties:
-                  data:
-                    type: object
-                    properties:
-                      paper:
-                        $ref: "#/components/schemas/PaperDetail"
-                    required:
-                      - paper
-                    additionalProperties: false
+                  paper:
+                    $ref: "#/components/schemas/PaperDetail"
                 required:
-                  - data
+                  - paper
                 additionalProperties: false
         "400":
           description: bad_request
@@ -1764,16 +2380,10 @@ paths:
               schema:
                 type: object
                 properties:
-                  data:
-                    type: object
-                    properties:
-                      paper:
-                        $ref: "#/components/schemas/Paper"
-                    required:
-                      - paper
-                    additionalProperties: false
+                  paper:
+                    $ref: "#/components/schemas/Paper"
                 required:
-                  - data
+                  - paper
                 additionalProperties: false
         "400":
           description: bad_request
@@ -1835,18 +2445,12 @@ paths:
               schema:
                 type: object
                 properties:
-                  data:
-                    type: object
-                    properties:
-                      invites:
-                        type: array
-                        items:
-                          $ref: "#/components/schemas/Invite"
-                    required:
-                      - invites
-                    additionalProperties: false
+                  invites:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Invite"
                 required:
-                  - data
+                  - invites
                 additionalProperties: false
         "401":
           description: unauthorized
@@ -1909,16 +2513,10 @@ paths:
               schema:
                 type: object
                 properties:
-                  data:
-                    type: object
-                    properties:
-                      invite:
-                        $ref: "#/components/schemas/CreatedInvite"
-                    required:
-                      - invite
-                    additionalProperties: false
+                  invite:
+                    $ref: "#/components/schemas/CreatedInvite"
                 required:
-                  - data
+                  - invite
                 additionalProperties: false
         "401":
           description: unauthorized
@@ -1986,16 +2584,10 @@ paths:
               schema:
                 type: object
                 properties:
-                  data:
-                    type: object
-                    properties:
-                      invite:
-                        $ref: "#/components/schemas/Invite"
-                    required:
-                      - invite
-                    additionalProperties: false
+                  invite:
+                    $ref: "#/components/schemas/Invite"
                 required:
-                  - data
+                  - invite
                 additionalProperties: false
         "401":
           description: unauthorized
@@ -2050,16 +2642,10 @@ paths:
               schema:
                 type: object
                 properties:
-                  data:
-                    type: object
-                    properties:
-                      paper:
-                        $ref: "#/components/schemas/Paper"
-                    required:
-                      - paper
-                    additionalProperties: false
+                  paper:
+                    $ref: "#/components/schemas/Paper"
                 required:
-                  - data
+                  - paper
                 additionalProperties: false
         "400":
           description: bad_request
@@ -2100,7 +2686,7 @@ paths:
   /api/papers/{paperId}/editions:
     get:
       operationId: listEditions
-      summary: List a paper's published editions and current draft, newest first.
+      summary: List a paper's current draft and published editions (back issues), newest first.
       tags:
         - editions
       security:
@@ -2121,18 +2707,12 @@ paths:
               schema:
                 type: object
                 properties:
-                  data:
-                    type: object
-                    properties:
-                      editions:
-                        type: array
-                        items:
-                          $ref: "#/components/schemas/EditionSummary"
-                    required:
-                      - editions
-                    additionalProperties: false
+                  editions:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/EditionSummary"
                 required:
-                  - data
+                  - editions
                 additionalProperties: false
         "401":
           description: unauthorized
@@ -2182,16 +2762,10 @@ paths:
               schema:
                 type: object
                 properties:
-                  data:
-                    type: object
-                    properties:
-                      edition:
-                        $ref: "#/components/schemas/EditionSummary"
-                    required:
-                      - edition
-                    additionalProperties: false
+                  edition:
+                    $ref: "#/components/schemas/EditionSummary"
                 required:
-                  - data
+                  - edition
                 additionalProperties: false
         "401":
           description: unauthorized
@@ -2220,7 +2794,7 @@ paths:
   /api/editions/{editionId}:
     get:
       operationId: getEditionBundle
-      summary: Everything the app needs to render an edition, with short-lived signed image URLs.
+      summary: "Everything needed to render an edition: members, progress, published pages with reactions, horoscopes, and birthdays. Signed image URLs are short-lived."
       tags:
         - editions
       security:
@@ -2241,16 +2815,10 @@ paths:
               schema:
                 type: object
                 properties:
-                  data:
-                    type: object
-                    properties:
-                      bundle:
-                        $ref: "#/components/schemas/EditionBundle"
-                    required:
-                      - bundle
-                    additionalProperties: false
+                  bundle:
+                    $ref: "#/components/schemas/EditionBundle"
                 required:
-                  - data
+                  - bundle
                 additionalProperties: false
         "400":
           description: bad_request
@@ -2285,7 +2853,7 @@ paths:
   /api/editions/{editionId}/publish:
     post:
       operationId: publishEdition
-      summary: Publish the edition with approved strips only. Owner only. Blocks further edits.
+      summary: Publish the edition with every approved page. Owner only, after the deadline. Panels still generating block publishing; failed panels publish as placeholders.
       tags:
         - editions
       security:
@@ -2314,16 +2882,10 @@ paths:
               schema:
                 type: object
                 properties:
-                  data:
-                    type: object
-                    properties:
-                      edition:
-                        $ref: "#/components/schemas/EditionSummary"
-                    required:
-                      - edition
-                    additionalProperties: false
+                  edition:
+                    $ref: "#/components/schemas/EditionSummary"
                 required:
-                  - data
+                  - edition
                 additionalProperties: false
         "400":
           description: bad_request
@@ -2350,7 +2912,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
         "409":
-          description: conflict, edition_locked
+          description: conflict
           content:
             application/json:
               schema:
@@ -2367,12 +2929,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
-  /api/editions/{editionId}/order:
+  /api/editions/{editionId}/saved:
     put:
-      operationId: reorderEvents
-      summary: Reorder the caller's own events in a draft edition.
+      operationId: saveEdition
+      summary: Keep a published edition forever, or undo that. Owner only. Applies to every member.
       tags:
-        - events
+        - editions
       security:
         - supabaseJwt: []
       x-phase: 4
@@ -2388,7 +2950,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/ReorderRequest"
+              $ref: "#/components/schemas/SaveEditionRequest"
       responses:
         "200":
           description: Success.
@@ -2397,29 +2959,310 @@ paths:
               schema:
                 type: object
                 properties:
-                  data:
-                    type: object
+                  edition:
+                    $ref: "#/components/schemas/EditionSummary"
+                required:
+                  - edition
+                additionalProperties: false
+        "400":
+          description: bad_request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "401":
+          description: unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "403":
+          description: forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: not_found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "409":
+          description: conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "429":
+          description: rate_limited
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "500":
+          description: internal
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /api/editions/{editionId}/stories/{storyId}/reaction:
+    put:
+      operationId: setReaction
+      summary: React to a story in a published edition (one reaction per member), or remove it.
+      tags:
+        - editions
+      security:
+        - supabaseJwt: []
+      x-phase: 4
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+          required: true
+          name: editionId
+          in: path
+        - schema:
+            type: string
+            format: uuid
+          required: true
+          name: storyId
+          in: path
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetReactionRequest"
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReactionResult"
+        "400":
+          description: bad_request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "401":
+          description: unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: not_found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "409":
+          description: conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "429":
+          description: rate_limited
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "500":
+          description: internal
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /api/pages/current:
+    get:
+      operationId: getCurrentPage
+      summary: Get your page for this week, or null if you haven't picked papers yet.
+      tags:
+        - pages
+      security:
+        - supabaseJwt: []
+      x-phase: 4
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  page:
+                    type:
+                      - object
+                      - "null"
                     properties:
-                      events:
+                      id:
+                        type: string
+                        format: uuid
+                      weekStart:
+                        type: string
+                        format: date
+                        description: Monday of the page's week.
+                      weekEnd:
+                        type: string
+                        format: date
+                        description: Calendar date, YYYY-MM-DD.
+                      deadline:
+                        type: string
+                        format: date-time
+                        description: The earliest deadline among the linked papers.
+                      locked:
+                        type: boolean
+                        description: True once the deadline has passed. Nothing can change.
+                      style:
+                        type: string
+                        enum:
+                          - classic
+                          - manga
+                          - sketch
+                          - superhero
+                        description: The author's style when the comic was generated.
+                      papers:
                         type: array
                         items:
-                          type: object
-                          properties:
-                            id:
-                              type: string
-                              format: uuid
-                            position:
-                              type: integer
-                              minimum: 0
-                          required:
-                            - id
-                            - position
-                          additionalProperties: false
+                          $ref: "#/components/schemas/PagePaper"
+                        maxItems: 10
+                      status:
+                        $ref: "#/components/schemas/PageStatus"
+                      highlights:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/Highlight"
+                        maxItems: 3
+                      stories:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/Story"
+                        maxItems: 3
+                        description: In highlight order.
+                      comic:
+                        type:
+                          - object
+                          - "null"
+                        properties:
+                          title:
+                            type: string
+                          panels:
+                            type: array
+                            items:
+                              $ref: "#/components/schemas/Panel"
+                            description: In display order.
+                        required:
+                          - title
+                          - panels
+                        additionalProperties: false
+                        description: Null before generation, or when every highlight is serious.
+                      notices:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/PageNotice"
+                      limits:
+                        type: object
+                        properties:
+                          regenerationsLeft:
+                            type: integer
+                            minimum: 0
+                          rewritesLeft:
+                            type: integer
+                            minimum: 0
+                          redrawsLeft:
+                            type: integer
+                            minimum: 0
+                        required:
+                          - regenerationsLeft
+                          - rewritesLeft
+                          - redrawsLeft
+                        additionalProperties: false
+                      generatedAt:
+                        type:
+                          - string
+                          - "null"
+                        format: date-time
+                        description: ISO 8601 timestamp.
+                      approvedAt:
+                        type:
+                          - string
+                          - "null"
+                        format: date-time
+                        description: ISO 8601 timestamp.
+                      urlsExpireAt:
+                        type: string
+                        format: date-time
+                        description: ISO 8601 timestamp.
                     required:
-                      - events
+                      - id
+                      - weekStart
+                      - weekEnd
+                      - deadline
+                      - locked
+                      - style
+                      - papers
+                      - status
+                      - highlights
+                      - stories
+                      - comic
+                      - notices
+                      - limits
+                      - generatedAt
+                      - approvedAt
+                      - urlsExpireAt
                     additionalProperties: false
+                    description: Null until you pick papers for this week.
                 required:
-                  - data
+                  - page
+                additionalProperties: false
+        "401":
+          description: unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "429":
+          description: rate_limited
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "500":
+          description: internal
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+    put:
+      operationId: setCurrentPagePapers
+      summary: Pick the papers this week's page goes to, creating the page if needed. Each paper's current edition must still be open.
+      tags:
+        - pages
+      security:
+        - supabaseJwt: []
+      x-phase: 4
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetPagePapersRequest"
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  page:
+                    $ref: "#/components/schemas/Page"
+                required:
+                  - page
                 additionalProperties: false
         "400":
           description: bad_request
@@ -2457,21 +3300,163 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
-  /api/events:
-    post:
-      operationId: createEvent
-      summary: Add a highlight. Generates headline, article, and panel description (text only, synchronous).
+  /api/pages/{pageId}:
+    get:
+      operationId: getPage
+      summary: Get one of your pages.
       tags:
-        - events
+        - pages
       security:
         - supabaseJwt: []
       x-phase: 4
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+          required: true
+          name: pageId
+          in: path
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  page:
+                    $ref: "#/components/schemas/Page"
+                required:
+                  - page
+                additionalProperties: false
+        "400":
+          description: bad_request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "401":
+          description: unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: not_found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "429":
+          description: rate_limited
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "500":
+          description: internal
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+    patch:
+      operationId: updatePage
+      summary: Edit headlines, story text, the comic title, captions, or dialogue. Edits are moderated.
+      tags:
+        - pages
+      security:
+        - supabaseJwt: []
+      x-phase: 4
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+          required: true
+          name: pageId
+          in: path
       requestBody:
         required: false
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/CreateEventRequest"
+              $ref: "#/components/schemas/UpdatePageRequest"
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  page:
+                    $ref: "#/components/schemas/Page"
+                required:
+                  - page
+                additionalProperties: false
+        "400":
+          description: bad_request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "401":
+          description: unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: not_found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "409":
+          description: conflict, edition_locked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "422":
+          description: content_blocked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "429":
+          description: rate_limited
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "500":
+          description: internal
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /api/pages/{pageId}/highlights:
+    post:
+      operationId: addHighlight
+      summary: Add a highlight (up to 3). Moderated; nothing is generated yet.
+      tags:
+        - pages
+      security:
+        - supabaseJwt: []
+      x-phase: 4
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+          required: true
+          name: pageId
+          in: path
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateHighlightRequest"
       responses:
         "201":
           description: Success.
@@ -2480,16 +3465,332 @@ paths:
               schema:
                 type: object
                 properties:
-                  data:
-                    type: object
-                    properties:
-                      event:
-                        $ref: "#/components/schemas/OwnEvent"
-                    required:
-                      - event
-                    additionalProperties: false
+                  highlight:
+                    $ref: "#/components/schemas/Highlight"
                 required:
-                  - data
+                  - highlight
+                additionalProperties: false
+        "400":
+          description: bad_request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "401":
+          description: unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: not_found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "409":
+          description: conflict, edition_locked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "422":
+          description: content_blocked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "429":
+          description: rate_limited
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "500":
+          description: internal
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /api/pages/{pageId}/highlights/order:
+    put:
+      operationId: reorderHighlights
+      summary: Reorder your highlights. Stories follow the same order.
+      tags:
+        - pages
+      security:
+        - supabaseJwt: []
+      x-phase: 4
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+          required: true
+          name: pageId
+          in: path
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReorderHighlightsRequest"
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  page:
+                    $ref: "#/components/schemas/Page"
+                required:
+                  - page
+                additionalProperties: false
+        "400":
+          description: bad_request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "401":
+          description: unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: not_found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "409":
+          description: edition_locked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "429":
+          description: rate_limited
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "500":
+          description: internal
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /api/pages/{pageId}/generate:
+    post:
+      operationId: generatePage
+      summary: Write a story for each highlight and a 4-panel comic script, in your style. Returns the stored page unless regenerate is true. Panel images start as pending; draw them with the panel route.
+      tags:
+        - pages
+      security:
+        - supabaseJwt: []
+      x-phase: 4
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+          required: true
+          name: pageId
+          in: path
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GeneratePageRequest"
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  page:
+                    $ref: "#/components/schemas/Page"
+                required:
+                  - page
+                additionalProperties: false
+        "400":
+          description: bad_request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "401":
+          description: unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: not_found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "409":
+          description: conflict, edition_locked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "429":
+          description: quota_exceeded, rate_limited
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "500":
+          description: internal
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "503":
+          description: provider_unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /api/pages/{pageId}/stories/{storyId}/rewrite:
+    post:
+      operationId: rewriteStory
+      summary: Write a new headline and story for one highlight. Limited per page.
+      tags:
+        - pages
+      security:
+        - supabaseJwt: []
+      x-phase: 4
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+          required: true
+          name: pageId
+          in: path
+        - schema:
+            type: string
+            format: uuid
+          required: true
+          name: storyId
+          in: path
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: {}
+              additionalProperties: false
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  story:
+                    $ref: "#/components/schemas/Story"
+                required:
+                  - story
+                additionalProperties: false
+        "400":
+          description: bad_request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "401":
+          description: unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: not_found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "409":
+          description: conflict, edition_locked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "429":
+          description: quota_exceeded, rate_limited
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "500":
+          description: internal
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "503":
+          description: provider_unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /api/pages/{pageId}/panels/{index}:
+    post:
+      operationId: drawPanel
+      summary: Draw one panel and wait for the image. Fire all four in parallel after generating. Returns the stored image unless regenerate is true.
+      tags:
+        - pages
+      security:
+        - supabaseJwt: []
+      x-phase: 4
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+          required: true
+          name: pageId
+          in: path
+        - schema:
+            type: string
+            enum:
+              - "0"
+              - "1"
+              - "2"
+              - "3"
+            description: Panel index, 0 to 3.
+          required: true
+          description: Panel index, 0 to 3.
+          name: index
+          in: path
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DrawPanelRequest"
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  panel:
+                    $ref: "#/components/schemas/Panel"
+                required:
+                  - panel
                 additionalProperties: false
         "400":
           description: bad_request
@@ -2539,12 +3840,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
-  /api/events/{eventId}:
-    get:
-      operationId: getEvent
-      summary: Get one of the caller's events. Use to poll panel.status.
+  /api/pages/{pageId}/panels/order:
+    put:
+      operationId: reorderPanels
+      summary: Reorder the comic's panels.
       tags:
-        - events
+        - pages
       security:
         - supabaseJwt: []
       x-phase: 4
@@ -2553,7 +3854,151 @@ paths:
             type: string
             format: uuid
           required: true
-          name: eventId
+          name: pageId
+          in: path
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReorderPanelsRequest"
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  page:
+                    $ref: "#/components/schemas/Page"
+                required:
+                  - page
+                additionalProperties: false
+        "400":
+          description: bad_request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "401":
+          description: unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: not_found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "409":
+          description: conflict, edition_locked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "429":
+          description: rate_limited
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "500":
+          description: internal
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /api/pages/{pageId}/approve:
+    post:
+      operationId: approvePage
+      summary: Approve your page for every linked paper. Needs generated, non-stale content and no panel still generating. Any later edit clears approval.
+      tags:
+        - pages
+      security:
+        - supabaseJwt: []
+      x-phase: 4
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+          required: true
+          name: pageId
+          in: path
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: {}
+              additionalProperties: false
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  page:
+                    $ref: "#/components/schemas/Page"
+                required:
+                  - page
+                additionalProperties: false
+        "400":
+          description: bad_request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "401":
+          description: unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: not_found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "409":
+          description: conflict, edition_locked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "429":
+          description: rate_limited
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "500":
+          description: internal
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /api/highlights/{highlightId}:
+    get:
+      operationId: getHighlight
+      summary: Get one of your highlights.
+      tags:
+        - pages
+      security:
+        - supabaseJwt: []
+      x-phase: 4
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+          required: true
+          name: highlightId
           in: path
       responses:
         "200":
@@ -2563,16 +4008,10 @@ paths:
               schema:
                 type: object
                 properties:
-                  data:
-                    type: object
-                    properties:
-                      event:
-                        $ref: "#/components/schemas/OwnEvent"
-                    required:
-                      - event
-                    additionalProperties: false
+                  highlight:
+                    $ref: "#/components/schemas/Highlight"
                 required:
-                  - data
+                  - highlight
                 additionalProperties: false
         "400":
           description: bad_request
@@ -2605,10 +4044,10 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
     patch:
-      operationId: updateEvent
-      summary: Edit headline or article, toggle serious or inComic, or approve.
+      operationId: updateHighlight
+      summary: Edit text or toggle serious or inComic. Edited text is moderated. Marks the page stale.
       tags:
-        - events
+        - pages
       security:
         - supabaseJwt: []
       x-phase: 4
@@ -2617,14 +4056,14 @@ paths:
             type: string
             format: uuid
           required: true
-          name: eventId
+          name: highlightId
           in: path
       requestBody:
         required: false
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/UpdateEventRequest"
+              $ref: "#/components/schemas/UpdateHighlightRequest"
       responses:
         "200":
           description: Success.
@@ -2633,16 +4072,10 @@ paths:
               schema:
                 type: object
                 properties:
-                  data:
-                    type: object
-                    properties:
-                      event:
-                        $ref: "#/components/schemas/OwnEvent"
-                    required:
-                      - event
-                    additionalProperties: false
+                  highlight:
+                    $ref: "#/components/schemas/Highlight"
                 required:
-                  - data
+                  - highlight
                 additionalProperties: false
         "400":
           description: bad_request
@@ -2687,10 +4120,10 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
     delete:
-      operationId: deleteEvent
-      summary: Delete one of the caller's events, its panel, and its photos. Draft editions only.
+      operationId: deleteHighlight
+      summary: Delete one of your highlights and its photos, before the deadline. Marks the page stale.
       tags:
-        - events
+        - pages
       security:
         - supabaseJwt: []
       x-phase: 4
@@ -2699,7 +4132,7 @@ paths:
             type: string
             format: uuid
           required: true
-          name: eventId
+          name: highlightId
           in: path
       responses:
         "200":
@@ -2707,13 +4140,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  data:
-                    $ref: "#/components/schemas/Deleted"
-                required:
-                  - data
-                additionalProperties: false
+                $ref: "#/components/schemas/Deleted"
         "400":
           description: bad_request
           content:
@@ -2750,103 +4177,10 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
-  /api/events/{eventId}/panel:
-    post:
-      operationId: requestPanel
-      summary: Start panel generation and return immediately. Idempotent while generating.
-      tags:
-        - events
-      security:
-        - supabaseJwt: []
-      x-phase: 4
-      parameters:
-        - schema:
-            type: string
-            format: uuid
-          required: true
-          name: eventId
-          in: path
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/RequestPanelRequest"
-      responses:
-        "202":
-          description: Accepted. Poll the status field.
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    type: object
-                    properties:
-                      eventId:
-                        type: string
-                        format: uuid
-                      panel:
-                        $ref: "#/components/schemas/Panel"
-                    required:
-                      - eventId
-                      - panel
-                    additionalProperties: false
-                required:
-                  - data
-                additionalProperties: false
-        "400":
-          description: bad_request
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorEnvelope"
-        "401":
-          description: unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorEnvelope"
-        "404":
-          description: not_found
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorEnvelope"
-        "409":
-          description: edition_locked
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorEnvelope"
-        "422":
-          description: content_blocked
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorEnvelope"
-        "429":
-          description: quota_exceeded, rate_limited
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorEnvelope"
-        "500":
-          description: internal
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorEnvelope"
-        "503":
-          description: provider_unavailable
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorEnvelope"
-  /api/events/{eventId}/photos:
+  /api/highlights/{highlightId}/photos:
     post:
       operationId: addPhoto
-      summary: Attach a photo to one of the caller's events. Draft editions only.
+      summary: Attach a photo to one of your highlights (up to 4). Moderated. Before the deadline only.
       tags:
         - photos
       security:
@@ -2857,7 +4191,7 @@ paths:
             type: string
             format: uuid
           required: true
-          name: eventId
+          name: highlightId
           in: path
       requestBody:
         required: true
@@ -2873,16 +4207,10 @@ paths:
               schema:
                 type: object
                 properties:
-                  data:
-                    type: object
-                    properties:
-                      photo:
-                        $ref: "#/components/schemas/Photo"
-                    required:
-                      - photo
-                    additionalProperties: false
+                  photo:
+                    $ref: "#/components/schemas/Photo"
                 required:
-                  - data
+                  - photo
                 additionalProperties: false
         "400":
           description: bad_request
@@ -2920,6 +4248,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
+        "422":
+          description: content_blocked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
         "429":
           description: rate_limited
           content:
@@ -2935,7 +4269,7 @@ paths:
   /api/photos/{photoId}:
     delete:
       operationId: deletePhoto
-      summary: Delete one of the caller's photos. Allowed at any time, including after publishing.
+      summary: Delete one of your photos. Allowed at any time, including after publishing.
       tags:
         - photos
       security:
@@ -2954,13 +4288,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  data:
-                    $ref: "#/components/schemas/Deleted"
-                required:
-                  - data
-                additionalProperties: false
+                $ref: "#/components/schemas/Deleted"
         "400":
           description: bad_request
           content:
@@ -3014,13 +4342,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  data:
-                    $ref: "#/components/schemas/LogoutResult"
-                required:
-                  - data
-                additionalProperties: false
+                $ref: "#/components/schemas/LogoutResult"
         "401":
           description: unauthorized
           content:
@@ -3054,13 +4376,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  data:
-                    $ref: "#/components/schemas/CronResult"
-                required:
-                  - data
-                additionalProperties: false
+                $ref: "#/components/schemas/CronResult"
         "401":
           description: unauthorized
           content:
@@ -3076,7 +4392,7 @@ paths:
   /api/internal/cleanup:
     get:
       operationId: runCleanup
-      summary: "Cron: purge expired posts, lapsed sessions, and stale selfies (rows and files)."
+      summary: "Cron: purge editions past their 14-day expiry (unless saved), lapsed drafts, and stale avatar photos (rows and files)."
       tags:
         - internal
       security:
@@ -3088,13 +4404,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  data:
-                    $ref: "#/components/schemas/CronResult"
-                required:
-                  - data
-                additionalProperties: false
+                $ref: "#/components/schemas/CronResult"
         "401":
           description: unauthorized
           content:

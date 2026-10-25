@@ -151,18 +151,18 @@ describe("limits and ownership", () => {
     await expect(createEdition(w.paperB, "2026-10-21")).rejects.toThrow(/check constraint/);
   });
 
-  it("caps papers at 12 members", async () => {
+  it("caps papers at 8 members", async () => {
     const owner = await createUser("cap-owner");
     extraUsers.push(owner);
     const paper = await createPaper(owner, "Crowded");
     extraPapers.push(paper);
-    const joiners = await Promise.all(Array.from({ length: 12 }, (_, i) => createUser(`cap-${i}`)));
+    const joiners = await Promise.all(Array.from({ length: 8 }, (_, i) => createUser(`cap-${i}`)));
     extraUsers.push(...joiners);
-    for (const u of joiners.slice(0, 11)) {
+    for (const u of joiners.slice(0, 7)) {
       const { error } = await db().from("paper_members").insert({ paper_id: paper, user_id: u.id });
       expect(error).toBeNull();
     }
-    const { error } = await db().from("paper_members").insert({ paper_id: paper, user_id: joiners[11]!.id });
+    const { error } = await db().from("paper_members").insert({ paper_id: paper, user_id: joiners[7]!.id });
     expect(error?.message).toContain("paper_full");
   });
 });

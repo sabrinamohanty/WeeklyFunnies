@@ -1,9 +1,8 @@
 import { OpenAPIRegistry, OpenApiGeneratorV31 } from "@asteasolutions/zod-to-openapi";
 import { ERROR_CODES, errorEnvelopeSchema } from "./errors";
-import { dataEnvelope } from "./common";
-import { routes } from "./routes";
+import { type RouteContract, routes } from "./routes";
 
-export const API_VERSION = "0.2.0";
+export const API_VERSION = "0.5.0";
 
 export function buildOpenApiDocument() {
   const registry = new OpenAPIRegistry();
@@ -59,8 +58,8 @@ export function buildOpenApiDocument() {
       },
       responses: {
         [String(r.success.status)]: {
-          description: r.success.status === 202 ? "Accepted. Poll the status field." : "Success.",
-          content: { "application/json": { schema: dataEnvelope(r.success.schema) } },
+          description: (r.success as RouteContract["success"]).description ?? "Success.",
+          content: { "application/json": { schema: r.success.schema } },
         },
         ...errorResponses,
       },

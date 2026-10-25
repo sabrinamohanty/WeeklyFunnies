@@ -24,6 +24,24 @@ export const envSchema = z
     // Shared secret for cron-only internal routes.
     CRON_SECRET: z.string().min(32),
 
+    // Exact browser origins allowed to call the API, comma-separated. Empty means no browser access.
+    CORS_ALLOWED_ORIGINS: z
+      .string()
+      .default("")
+      .transform((v) =>
+        v
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean),
+      )
+      .pipe(
+        z.array(
+          z.url().refine((u) => URL.parse(u)?.origin === u, {
+            message: "must be an origin like https://app.example.com",
+          }),
+        ),
+      ),
+
     // AI and moderation: provider selection only. Vendor details live inside the real provider.
     AI_PROVIDER: z.enum(["stub", "real"]).default("stub"),
     MODERATION_PROVIDER: z.enum(["stub", "real"]).default("stub"),
@@ -32,7 +50,6 @@ export const envSchema = z
     AI_REAL_TEXT_MODEL: optionalString,
     AI_REAL_IMAGE_MODEL: optionalString,
     MODERATION_REAL_API_KEY: optionalString,
-    AI_STYLE_ID: z.string().min(1).max(64).default("default"),
 
     // AI cost and abuse limits.
     AI_TIMEOUT_MS: int(30_000, 1_000, 120_000),
@@ -55,7 +72,7 @@ export const envSchema = z
     // Retention.
     RETENTION_WINDOW_DAYS: int(30, 1, 365),
     RETENTION_LOGOUT_GRACE_HOURS: int(24, 0, 24 * 30),
-    RETENTION_PUBLISHED_DAYS: int(30, 1, 365),
+    RETENTION_PUBLISHED_DAYS: int(14, 1, 365),
     SELFIE_MAX_AGE_MINUTES: int(60, 1, 24 * 60),
 
     // Storage.
@@ -76,6 +93,13 @@ export const envSchema = z
         code: "custom",
         path: ["MODERATION_REAL_API_KEY"],
         message: "required when MODERATION_PROVIDER=real",
+      });
+    }
+    if (env.APP_ENV === "production" && env.CORS_ALLOWED_ORIGINS.some((o) => !o.startsWith("https://"))) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["CORS_ALLOWED_ORIGINS"],
+        message: "production origins must use https",
       });
     }
     if (env.APP_ENV === "production" && env.RATE_LIMIT_ROUTE_SCALE !== 1) {

@@ -50,8 +50,8 @@ async function expectError(res: Response, status: number, code: string) {
   expect(res.status).toBe(status);
   const json = (await res.json()) as ErrorEnvelope;
   expect(errorEnvelopeSchema.safeParse(json).success).toBe(true);
-  expect(json.error.code).toBe(code);
-  expect(json.error.requestId).toBe(res.headers.get("x-request-id"));
+  expect(json.code).toBe(code);
+  expect(json.requestId).toBe(res.headers.get("x-request-id"));
   return json;
 }
 
@@ -61,7 +61,7 @@ describe("defineRoute", () => {
     expect(res.status).toBe(201);
     expect(res.headers.get("cache-control")).toBe("no-store");
     expect(res.headers.get("x-request-id")).toMatch(/^req_/);
-    expect(await res.json()).toEqual({ data: { id: `${THING}:${USER_ID}`, name: "Ama" } });
+    expect(await res.json()).toEqual({ id: `${THING}:${USER_ID}`, name: "Ama" });
   });
 
   it("rejects missing or bad tokens with 401 before touching the body", async () => {
@@ -80,7 +80,7 @@ describe("defineRoute", () => {
   it("rejects unknown fields and reports paths without echoing values", async () => {
     const res = await makeRoute()(request({ name: "ok", isAdmin: "SECRET_VALUE" }), params());
     const json = await expectError(res, 400, "bad_request");
-    expect(json.error.details).toEqual([{ path: "body.isAdmin", issue: "unrecognized_keys" }]);
+    expect(json.details).toEqual([{ path: "body.isAdmin", issue: "unrecognized_keys" }]);
     expect(JSON.stringify(json)).not.toContain("SECRET_VALUE");
   });
 
@@ -143,7 +143,7 @@ describe("defineRoute", () => {
       const res = await route(request({ name: "c" }), params());
       const json = await expectError(res, 429, "rate_limited");
       expect(Number(res.headers.get("retry-after"))).toBeGreaterThan(0);
-      expect(json.error.retryAfterSeconds).toBeGreaterThan(0);
+      expect(json.retryAfterSeconds).toBeGreaterThan(0);
     } finally {
       delete process.env.RATE_LIMIT_USER_PER_MINUTE;
       resetConfigCache();

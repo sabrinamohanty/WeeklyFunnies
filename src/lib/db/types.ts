@@ -393,6 +393,7 @@ export type Database = {
       profiles: {
         Row: {
           avatar_path: string | null;
+          avatar_traits: Json | null;
           birthday: string | null;
           city_admin1: string | null;
           city_country: string | null;
@@ -404,7 +405,9 @@ export type Database = {
           lat: number | null;
           lng: number | null;
           logged_out_at: string | null;
+          look: string | null;
           name: string | null;
+          style: string;
           timezone: string | null;
           updated_at: string;
           zodiac_sign: string | null;
@@ -412,6 +415,7 @@ export type Database = {
         ComputedFields: never;
         Insert: {
           avatar_path?: string | null;
+          avatar_traits?: Json | null;
           birthday?: string | null;
           city_admin1?: string | null;
           city_country?: string | null;
@@ -423,13 +427,16 @@ export type Database = {
           lat?: number | null;
           lng?: number | null;
           logged_out_at?: string | null;
+          look?: string | null;
           name?: string | null;
+          style?: string;
           timezone?: string | null;
           updated_at?: string;
           zodiac_sign?: never;
         };
         Update: {
           avatar_path?: string | null;
+          avatar_traits?: Json | null;
           birthday?: string | null;
           city_admin1?: string | null;
           city_country?: string | null;
@@ -441,7 +448,9 @@ export type Database = {
           lat?: number | null;
           lng?: number | null;
           logged_out_at?: string | null;
+          look?: string | null;
           name?: string | null;
+          style?: string;
           timezone?: string | null;
           updated_at?: string;
           zodiac_sign?: never;

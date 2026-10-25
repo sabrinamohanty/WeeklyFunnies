@@ -1,7 +1,7 @@
 import type { NextConfig } from "next";
 
-// The API is consumed by a native iOS app, not a browser, so no CORS headers are sent.
-// Browsers will refuse cross-origin calls by default, which is what we want.
+// The API is consumed by a separate web app. CORS is handled in src/proxy.ts with an exact-origin
+// allowlist (CORS_ALLOWED_ORIGINS); browsers refuse cross-origin calls from anywhere else.
 const securityHeaders = [
   { key: "Content-Security-Policy", value: "default-src 'none'; frame-ancestors 'none'" },
   { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains; preload" },

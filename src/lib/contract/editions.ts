@@ -1,13 +1,9 @@
 import { z } from "zod";
-import { isoDate, roleSchema, signedUrl, timestamp, uuid, zodiacSignSchema } from "./common";
-import { generationErrorSchema, generationStatusSchema } from "./profile";
-import { TEXT_LIMITS, textField } from "./text";
+import { isoDate, roleSchema, signedUrl, styleKeySchema, timestamp, uuid, zodiacSignSchema } from "./common";
+import { comicSchema, storySchema } from "./pages";
 
 export const editionIdParams = z.strictObject({ editionId: uuid });
-export const eventIdParams = z.strictObject({ eventId: uuid });
-export const photoIdParams = z.strictObject({ photoId: uuid });
-
-export const EVENT_LIMITS = { perPersonPerEdition: 3, photosPerEvent: 4 } as const;
+export const editionStoryParams = z.strictObject({ editionId: uuid, storyId: uuid });
 
 // ---------- Editions ----------
 
@@ -17,175 +13,70 @@ export const editionSummarySchema = z
   .strictObject({
     id: uuid,
     paperId: uuid,
+    issueNumber: z.number().int().positive().meta({ description: "1 for the paper's first edition." }),
     weekStart: isoDate.meta({ description: "Monday, in the paper owner's timezone." }),
     weekEnd: isoDate.meta({ description: "Sunday, in the paper owner's timezone." }),
+    deadline: timestamp.meta({
+      description: "Sunday 11:59 p.m. in the owner's timezone. Pages lock then; the owner publishes after.",
+    }),
     status: editionStatusSchema,
     publishedAt: timestamp.nullable(),
-    expiresAt: timestamp.nullable().meta({ description: "Set at publish: publishedAt + retention days." }),
+    expiresAt: timestamp.nullable().meta({
+      description: "When it will be deleted: publishedAt + 14 days. Null while a draft or while saved.",
+    }),
+    savedAt: timestamp.nullable().meta({ description: "Set when the owner saves it to keep forever." }),
   })
   .meta({ id: "EditionSummary" });
 
 export const editionResponseSchema = z.strictObject({ edition: editionSummarySchema });
 export const editionsResponseSchema = z.strictObject({ editions: z.array(editionSummarySchema) });
 
-// ---------- Photos ----------
-
-export const photoSchema = z
+export const saveEditionRequestSchema = z
   .strictObject({
-    id: uuid,
-    eventId: uuid,
-    url: signedUrl,
-    width: z.number().int().positive(),
-    height: z.number().int().positive(),
-    createdAt: timestamp,
+    saved: z.boolean().meta({ description: "true keeps it forever; false restores the 14-day expiry." }),
   })
-  .meta({ id: "Photo" });
+  .meta({ id: "SaveEditionRequest" });
 
-export const photoResponseSchema = z.strictObject({ photo: photoSchema });
+// ---------- Reactions ----------
 
-export const photoUploadSchema = z
+export const REACTIONS = ["ha", "aww", "hooray"] as const;
+export const reactionSchema = z.enum(REACTIONS).meta({ id: "Reaction" });
+
+export const reactionCountsSchema = z
   .strictObject({
-    photo: z.any().meta({
-      type: "string",
-      format: "binary",
-      description: "JPEG or PNG, at most 12 MB. Re-encoded server-side; all metadata is stripped.",
-    }),
+    ha: z.number().int().nonnegative(),
+    aww: z.number().int().nonnegative(),
+    hooray: z.number().int().nonnegative(),
   })
-  .meta({ id: "PhotoUpload" });
+  .meta({ id: "ReactionCounts", description: "Counts from members of this edition's paper only." });
 
-// ---------- Events ----------
+export const setReactionRequestSchema = z
+  .strictObject({ reaction: reactionSchema.nullable().meta({ description: "null removes your reaction." }) })
+  .meta({ id: "SetReactionRequest" });
 
-export const panelSchema = z
-  .strictObject({
-    status: generationStatusSchema,
-    url: signedUrl.nullable(),
-    error: generationErrorSchema.nullable(),
-  })
-  .meta({ id: "Panel" });
-
-export const eventNoticeSchema = z.enum(["fallback_used", "marked_serious"]).meta({
-  id: "EventNotice",
-  description:
-    "fallback_used: generation failed validation and safe default text was used; edit before approving. " +
-    "marked_serious: moderation flagged the topic as sensitive, so serious was turned on.",
-});
-
-const eventBase = {
-  id: uuid,
-  editionId: uuid,
-  userId: uuid,
-  headline: z.string(),
-  article: z.string(),
-  serious: z.boolean(),
-  inComic: z.boolean(),
-  position: z.number().int().nonnegative(),
-  panel: panelSchema,
-  photos: z.array(photoSchema).max(EVENT_LIMITS.photosPerEvent),
-};
-
-/** An event as seen by its author. */
-export const ownEventSchema = z
-  .strictObject({
-    ...eventBase,
-    sourceText: z.string().meta({ description: "What the author wrote. Only returned to the author." }),
-    approved: z.boolean(),
-    notices: z.array(eventNoticeSchema),
-    createdAt: timestamp,
-    updatedAt: timestamp,
-    expiresAt: timestamp,
-  })
-  .meta({ id: "OwnEvent" });
-
-/** An event as seen by other members, inside the edition bundle. */
-export const bundleEventSchema = z.strictObject(eventBase).meta({ id: "BundleEvent" });
-
-export const createEventRequestSchema = z
-  .strictObject({
-    editionId: uuid,
-    text: textField({
-      max: TEXT_LIMITS.highlight,
-      mode: "multiline",
-      description: "The highlight, in the author's words.",
-    }),
-    serious: z.boolean().default(false),
-  })
-  .meta({ id: "CreateEventRequest" });
-
-export const updateEventRequestSchema = z
-  .strictObject({
-    headline: textField({ max: TEXT_LIMITS.headline }).optional(),
-    article: textField({ max: TEXT_LIMITS.article, mode: "multiline" }).optional(),
-    serious: z.boolean().optional(),
-    inComic: z.boolean().optional(),
-    approved: z.boolean().optional(),
-  })
-  .refine((b) => Object.keys(b).length > 0, { message: "At least one field is required" })
-  .meta({
-    id: "UpdateEventRequest",
-    description:
-      "Editing headline, article, serious, or inComic clears approval unless approved=true is sent too.",
-  });
-
-export const requestPanelRequestSchema = z
-  .strictObject({
-    regenerate: z
-      .boolean()
-      .default(false)
-      .meta({ description: "Generate a new panel even if one is ready. Counts toward the daily image cap." }),
-  })
-  .meta({ id: "RequestPanelRequest" });
-
-export const reorderRequestSchema = z
-  .strictObject({
-    eventIds: z
-      .array(uuid)
-      .min(1)
-      .max(EVENT_LIMITS.perPersonPerEdition)
-      .refine((ids) => new Set(ids).size === ids.length, { message: "Duplicate ids" })
-      .meta({ description: "All of the caller's event ids in this edition, in the new order." }),
-  })
-  .meta({ id: "ReorderRequest" });
-
-export const eventResponseSchema = z.strictObject({ event: ownEventSchema });
-export const panelResponseSchema = z.strictObject({ eventId: uuid, panel: panelSchema });
-export const reorderResponseSchema = z.strictObject({
-  events: z.array(z.strictObject({ id: uuid, position: z.number().int().nonnegative() })),
-});
+export const reactionResponseSchema = z
+  .strictObject({ reactions: reactionCountsSchema, myReaction: reactionSchema.nullable() })
+  .meta({ id: "ReactionResult" });
 
 // ---------- Edition bundle ----------
 
-export const weatherSchema = z
-  .strictObject({
-    city: z.string(),
-    timezone: z.string(),
-    fetchedAt: timestamp,
-    days: z
-      .array(
-        z.strictObject({
-          date: isoDate,
-          tempMaxC: z.number(),
-          tempMinC: z.number(),
-          precipitationChance: z.number().int().min(0).max(100).nullable(),
-          weatherCode: z.number().int().meta({ description: "WMO weather interpretation code." }),
-          summary: z.string().meta({ description: "Short label for the code, e.g. 'Light rain'." }),
-        }),
-      )
-      .max(7),
-  })
-  .meta({ id: "Weather", description: "7-day forecast for the reader's own city." });
+export const progressSchema = z
+  .strictObject({ userId: uuid, status: z.enum(["not_started", "in_progress", "approved"]) })
+  .meta({ id: "Progress", description: "Each member's page status for this edition. No content." });
 
-export const stripSchema = z
+export const publishedStorySchema = storySchema
+  .extend({ reactions: reactionCountsSchema, myReaction: reactionSchema.nullable() })
+  .meta({ id: "PublishedStory" });
+
+export const publishedPageSchema = z
   .strictObject({
-    userId: uuid,
-    status: z.enum(["not_started", "in_progress", "approved"]),
-    events: z.array(bundleEventSchema).max(EVENT_LIMITS.perPersonPerEdition),
+    pageId: uuid,
+    authorId: uuid.meta({ description: "Matches a userId in members." }),
+    style: styleKeySchema,
+    stories: z.array(publishedStorySchema),
+    comic: comicSchema.nullable(),
   })
-  .meta({
-    id: "Strip",
-    description:
-      "In a draft edition, events is always empty: members see only their own posts (in myEvents) " +
-      "and each other's progress status. Events appear once the edition is published.",
-  });
+  .meta({ id: "PublishedPage" });
 
 export const editionBundleSchema = z
   .strictObject({
@@ -197,16 +88,25 @@ export const editionBundleSchema = z
         name: z.string(),
         city: z.string().nullable(),
         zodiacSign: zodiacSignSchema.nullable(),
-        avatarUrl: signedUrl.nullable(),
+        style: styleKeySchema,
+        avatarUrl: signedUrl.nullable().meta({ description: "In the member's own style." }),
         role: roleSchema,
       }),
     ),
-    myEvents: z
-      .array(ownEventSchema)
-      .meta({ description: "The viewer's own events in this edition, with review fields." }),
-    strips: z.array(stripSchema),
-    weather: weatherSchema.nullable(),
-    horoscopes: z.array(z.strictObject({ sign: zodiacSignSchema, text: z.string(), userIds: z.array(uuid) })),
+    progress: z.array(progressSchema),
+    pages: z.array(publishedPageSchema).meta({
+      description:
+        "Published editions: every approved page, in a stable shuffled order. Drafts: empty; use " +
+        "GET /api/pages/current for your own page.",
+    }),
+    horoscopes: z.array(
+      z.strictObject({
+        sign: zodiacSignSchema,
+        text: z.string(),
+        luckyNumber: z.number().int().min(1).max(99),
+        userIds: z.array(uuid).meta({ description: "Members with this sign." }),
+      }),
+    ),
     birthdays: z.array(
       z.strictObject({
         userId: uuid,
@@ -214,7 +114,7 @@ export const editionBundleSchema = z
         monthDay: z
           .string()
           .regex(/^\d{2}-\d{2}$/)
-          .meta({ description: "MM-DD. The year is never sent." }),
+          .meta({ description: "MM-DD. The year and age are never sent." }),
       }),
     ),
     urlsExpireAt: timestamp,

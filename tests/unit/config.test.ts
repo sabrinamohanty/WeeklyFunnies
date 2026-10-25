@@ -15,7 +15,7 @@ describe("getConfig", () => {
     expect(c.AI_PROVIDER).toBe("stub");
     expect(c.RETENTION_WINDOW_DAYS).toBe(30);
     expect(c.RETENTION_LOGOUT_GRACE_HOURS).toBe(24);
-    expect(c.RETENTION_PUBLISHED_DAYS).toBe(30);
+    expect(c.RETENTION_PUBLISHED_DAYS).toBe(14);
     expect(c.SELFIE_MAX_AGE_MINUTES).toBe(60);
     expect(c.AI_LIVE_TESTS).toBe(false);
   });
@@ -67,6 +67,32 @@ describe("getConfig", () => {
         RATE_LIMIT_ROUTE_SCALE: "100",
       }),
     ).toThrow(/RATE_LIMIT_ROUTE_SCALE/);
+  });
+
+  it("parses the CORS allowlist as exact origins", () => {
+    expect(getConfig({ ...base }).CORS_ALLOWED_ORIGINS).toEqual([]);
+    expect(
+      getConfig({ ...base, CORS_ALLOWED_ORIGINS: " http://localhost:3000 ,https://app.example.com," })
+        .CORS_ALLOWED_ORIGINS,
+    ).toEqual(["http://localhost:3000", "https://app.example.com"]);
+    for (const bad of ["*", "https://app.example.com/", "https://app.example.com/path", "app.example.com"]) {
+      expect(() => getConfig({ ...base, CORS_ALLOWED_ORIGINS: bad }), bad).toThrow(/CORS_ALLOWED_ORIGINS/);
+    }
+  });
+
+  it("refuses non-https CORS origins in production", () => {
+    const prod = {
+      ...base,
+      APP_ENV: "production",
+      MODERATION_PROVIDER: "real",
+      MODERATION_REAL_API_KEY: "k",
+    };
+    expect(() => getConfig({ ...prod, CORS_ALLOWED_ORIGINS: "http://localhost:3000" })).toThrow(
+      /CORS_ALLOWED_ORIGINS/,
+    );
+    expect(
+      getConfig({ ...prod, CORS_ALLOWED_ORIGINS: "https://app.example.com" }).CORS_ALLOWED_ORIGINS,
+    ).toHaveLength(1);
   });
 
   it("refuses stub moderation in production", () => {

@@ -17,13 +17,16 @@ const VENDOR_SDKS = [
   "groq-sdk",
   "together-ai",
   "@aws-sdk/client-bedrock*",
-  "ai",
   "@ai-sdk/*",
+];
+// Exact package names. A gitignore-style pattern "ai" would also match our own src/lib/ai.
+const VENDOR_SDK_PATHS = [
+  { name: "ai", message: "Vendor SDKs may only be imported in src/lib/ai/providers/real/." },
 ];
 
 export default tseslint.config(
   {
-    ignores: [".next/**", "node_modules/**", "coverage/**", "supabase/**", "next-env.d.ts"],
+    ignores: [".next/**", "node_modules/**", "coverage/**", "supabase/**", "next-env.d.ts", "frontend/**"],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,
@@ -43,6 +46,7 @@ export default tseslint.config(
       "no-restricted-imports": [
         "error",
         {
+          paths: VENDOR_SDK_PATHS,
           patterns: [
             {
               group: VENDOR_SDKS,
@@ -63,6 +67,7 @@ export default tseslint.config(
       "no-restricted-imports": [
         "error",
         {
+          paths: VENDOR_SDK_PATHS,
           patterns: [
             {
               group: VENDOR_SDKS,

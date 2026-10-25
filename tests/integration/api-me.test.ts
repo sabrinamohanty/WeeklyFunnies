@@ -86,7 +86,22 @@ describe("GET/PATCH /api/me", () => {
       birthday: null,
       zodiacSign: null,
       onboarded: false,
+      style: "classic",
+      look: null,
+      avatarUrl: null,
     });
+  });
+
+  it("sets the person's own art style and rejects unknown ones", async () => {
+    const patch = (body: unknown) =>
+      call(patchMe, { method: "PATCH", path: "/api/me", token: ama.token, body });
+    expect((await expectOk(await patch({ style: "superhero" }), routes.updateMe)).profile.style).toBe(
+      "superhero",
+    );
+    await expectError(await patch({ style: "hero" }), 400, "bad_request");
+    expect((await expectOk(await patch({ style: "classic" }), routes.updateMe)).profile.style).toBe(
+      "classic",
+    );
   });
 
   it("sets name and birthday, deriving the zodiac sign", async () => {
@@ -146,7 +161,7 @@ describe("GET/PATCH /api/me", () => {
       call(patchMe, { method: "PATCH", path: "/api/me", token: ama.token, body });
     await expectError(await patch({ cityId: 1 }), 404, "not_found");
     const unknown = await expectError(await patch({ name: "Ama", latitude: 1 }), 400, "bad_request");
-    expect(JSON.stringify(unknown.error.details)).toContain("latitude");
+    expect(JSON.stringify(unknown.details)).toContain("latitude");
     await expectError(
       await patch({ city: { name: "Kumasi", timezone: "Africa/Accra" } }),
       400,

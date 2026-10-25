@@ -68,7 +68,13 @@ export async function getPaper(paperId: string, role: Role): Promise<Paper> {
     await serviceDb().from("papers").select("id, name, created_at").eq("id", paperId).single(),
   );
   const counts = await memberCounts([paperId]);
-  return { id: p.id, name: p.name, role, memberCount: counts.get(paperId) ?? 0, createdAt: p.created_at };
+  return {
+    id: p.id,
+    name: p.name,
+    role,
+    memberCount: counts.get(paperId) ?? 0,
+    createdAt: p.created_at,
+  };
 }
 
 /** The contributor list. Only public profile fields: no birthday, coordinates, or storage paths. */
@@ -99,8 +105,8 @@ export async function createPaper(userId: string, name: string): Promise<string>
   return unwrap(await serviceDb().rpc("create_paper", { p_user: userId, p_name: name }));
 }
 
-export async function renamePaper(paperId: string, name: string): Promise<void> {
-  unwrap(await serviceDb().from("papers").update({ name }).eq("id", paperId).select("id").single());
+export async function updatePaper(paperId: string, changes: { name: string }): Promise<void> {
+  unwrap(await serviceDb().from("papers").update(changes).eq("id", paperId).select("id").single());
 }
 
 // ---------- Invites ----------
@@ -121,6 +127,18 @@ function toInvite(r: {
 }
 
 const INVITE_COLUMNS = "id, created_at, expires_at, revoked_at";
+
+/** Short codes can repeat; a new code must not match any invite that is still usable. */
+export async function activeInviteHashExists(codeHash: string): Promise<boolean> {
+  const { count, error } = await serviceDb()
+    .from("invites")
+    .select("id", { count: "exact", head: true })
+    .eq("code_hash", codeHash)
+    .is("revoked_at", null)
+    .gt("expires_at", new Date().toISOString());
+  if (error) throw new ApiError("internal");
+  return (count ?? 0) > 0;
+}
 
 export async function createInvite(paperId: string, userId: string, codeHash: string): Promise<Invite> {
   const db = serviceDb();

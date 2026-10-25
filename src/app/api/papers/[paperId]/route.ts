@@ -1,6 +1,6 @@
 import { routes } from "@/lib/contract/routes";
 import { defineRoute } from "@/lib/http/handler";
-import { getPaper, listMembers, renamePaper, requireMember, requireOwner } from "@/lib/papers/repo";
+import { getPaper, listMembers, updatePaper, requireMember, requireOwner } from "@/lib/papers/repo";
 
 export const GET = defineRoute(routes.getPaper, async ({ user, params }) => {
   const role = await requireMember(params.paperId, user.id);
@@ -10,6 +10,6 @@ export const GET = defineRoute(routes.getPaper, async ({ user, params }) => {
 
 export const PATCH = defineRoute(routes.updatePaper, async ({ user, params, body }) => {
   await requireOwner(params.paperId, user.id);
-  await renamePaper(params.paperId, body.name);
+  await updatePaper(params.paperId, body);
   return { data: { paper: await getPaper(params.paperId, "owner") } };
 });

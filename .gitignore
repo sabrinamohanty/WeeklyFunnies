@@ -23,3 +23,5 @@ coverage/
 .vercel/
 .DS_Store
 *.log
+
+frontend/dist/
