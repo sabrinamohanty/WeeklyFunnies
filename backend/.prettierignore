@@ -1,0 +1,7 @@
+.next/
+node_modules/
+coverage/
+pnpm-lock.yaml
+supabase/
+docs/openapi.yaml
+next-env.d.ts
