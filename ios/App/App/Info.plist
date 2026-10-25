@@ -29,6 +29,12 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<key>NSCameraUsageDescription</key>
+	<string>Meanwhile uses the camera so you can take a selfie for your cartoon avatar or snap a photo for a highlight.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Meanwhile uses your location to show the weather where you are.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Meanwhile uses your photos so you can attach them to your highlights and turn a selfie into your cartoon avatar.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
