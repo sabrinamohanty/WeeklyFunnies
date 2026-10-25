@@ -42,6 +42,7 @@ import {
   joinRequestSchema,
   paperDetailResponseSchema,
   paperIdParams,
+  leavePaperResponseSchema,
   paperResponseSchema,
   papersResponseSchema,
   updatePaperRequestSchema,
@@ -240,6 +241,17 @@ export const routes = {
     body: { kind: "json", schema: updatePaperRequestSchema },
     success: { status: 200, schema: paperResponseSchema },
     errors: ["bad_request", "forbidden", "not_found", ...AUTHED],
+  }),
+  leavePaper: route({
+    method: "DELETE",
+    path: "/api/papers/{paperId}/membership",
+    summary: "Leave a paper. The editor cannot leave, and a reader must stay in at least one paper.",
+    tag: "papers",
+    auth: "user",
+    phase: 2,
+    params: paperIdParams,
+    success: { status: 200, schema: leavePaperResponseSchema },
+    errors: ["bad_request", "not_found", "conflict", ...AUTHED],
   }),
 
   // ---------- Invites ----------

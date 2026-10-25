@@ -2,7 +2,7 @@ import type { z } from "zod";
 import type { ZodiacSign } from "@/lib/contract/common";
 import type { inviteSchema, memberSchema, paperSchema } from "@/lib/contract/papers";
 import { serviceDb } from "@/lib/db/client";
-import { unwrap, unwrapMaybe } from "@/lib/db/errors";
+import { dbError, unwrap, unwrapMaybe } from "@/lib/db/errors";
 import { ApiError } from "@/lib/http/errors";
 import { signUrls } from "@/lib/storage/signed";
 
@@ -107,6 +107,18 @@ export async function createPaper(userId: string, name: string): Promise<string>
 
 export async function updatePaper(paperId: string, changes: { name: string }): Promise<void> {
   unwrap(await serviceDb().from("papers").update(changes).eq("id", paperId).select("id").single());
+}
+
+/**
+ * Drop the caller's membership. The editor stays, so a paper always has an owner. A reader also
+ * stays in at least one paper. Unlinking removes that person's page from the paper.
+ */
+export async function leavePaper(paperId: string, userId: string): Promise<void> {
+  const role = await requireMember(paperId, userId);
+  if (role === "owner") throw new ApiError("conflict");
+  if ((await listPapers(userId)).length <= 1) throw new ApiError("conflict");
+  const { error } = await serviceDb().from("paper_members").delete().eq("paper_id", paperId).eq("user_id", userId);
+  if (error) throw dbError(error);
 }
 
 // ---------- Invites ----------

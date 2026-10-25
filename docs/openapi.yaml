@@ -655,6 +655,20 @@ components:
         - name
       additionalProperties: false
       description: Owner only.
+    LeftPaper:
+      type: object
+      properties:
+        paperId:
+          type: string
+          format: uuid
+        left:
+          type: boolean
+          enum:
+            - true
+      required:
+        - paperId
+        - left
+      additionalProperties: false
     Invite:
       type: object
       properties:
@@ -2405,6 +2419,65 @@ paths:
                 $ref: "#/components/schemas/ErrorEnvelope"
         "404":
           description: not_found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "429":
+          description: rate_limited
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "500":
+          description: internal
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /api/papers/{paperId}/membership:
+    delete:
+      operationId: leavePaper
+      summary: Leave a paper. The editor cannot leave, and a reader must stay in at least one paper.
+      tags:
+        - papers
+      security:
+        - supabaseJwt: []
+      x-phase: 2
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+          required: true
+          name: paperId
+          in: path
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LeftPaper"
+        "400":
+          description: bad_request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "401":
+          description: unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: not_found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "409":
+          description: conflict
           content:
             application/json:
               schema:

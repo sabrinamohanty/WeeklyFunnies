@@ -142,6 +142,7 @@ owner saves them.
 | POST   | `/api/papers`                                          | Create a paper (caller is owner)           | 2     |
 | GET    | `/api/papers/{paperId}`                                | Paper and contributor list                 | 2     |
 | PATCH  | `/api/papers/{paperId}`                                | Rename (owner)                             | 2     |
+| DELETE | `/api/papers/{paperId}/membership`                     | Leave a paper (not the editor, not the last) | 2   |
 | GET    | `/api/papers/{paperId}/invites`                        | List invites (owner; no codes)             | 2     |
 | POST   | `/api/papers/{paperId}/invites`                        | Create invite code (owner)                 | 2     |
 | DELETE | `/api/papers/{paperId}/invites/{inviteId}`             | Revoke invite (owner)                      | 2     |
@@ -395,6 +396,10 @@ Calls are logged as metadata only.
   - Reactions (`ha`, `aww`, `hooray`), saving editions forever (owner), server-computed lucky numbers, and
     back issues kept 14 days.
   - Weather moved out of the bundle into `GET /api/weather` (browser location or profile city).
+  - `DELETE /api/papers/{paperId}/membership` → `200 { paperId, left: true }`. A member can leave when
+    they still belong to another paper. The editor cannot leave, and neither can someone in their only
+    paper (`409 conflict`). Someone who is not a member gets `404`. Leaving unlinks that person's page
+    from the paper.
 - **0.4.0 (Phase 3, aligned with the comic pipeline handoff):**
   - Responses are bare JSON. Errors are `{ error: "message", code, requestId, details?, retryAfterSeconds? }`
     instead of `{ data }` and `{ error: { code, message, … } }`.

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { POST as joinPaper } from "@/app/api/invites/join/route";
+import { DELETE as leavePaper } from "@/app/api/papers/[paperId]/membership/route";
 import { GET as getPaper, PATCH as patchPaper } from "@/app/api/papers/[paperId]/route";
 import { DELETE as revokeInvite } from "@/app/api/papers/[paperId]/invites/[inviteId]/route";
 import { GET as listInvites, POST as createInvite } from "@/app/api/papers/[paperId]/invites/route";
@@ -437,6 +438,32 @@ describe("Postgres rate limiter", () => {
     expect(table.error?.code).toBe("42501");
     const fn = await ama.client.rpc("join_paper", { p_code_hash: "a".repeat(64), p_user: ama.id });
     expect(fn.error).not.toBeNull();
+  });
+});
+
+describe("leaving a paper", () => {
+  it("lets a member leave a second paper, and refuses the editor and a last paper", async () => {
+    const member = await createUser("leaver");
+    users.push(member);
+    const home = await newPaper(ama, "Home Desk");
+    const extra = await newPaper(ama, "Extra Desk");
+    await expectOk(await join(member, (await newInvite(ama, home)).code), routes.joinPaper);
+    await expectOk(await join(member, (await newInvite(ama, extra)).code), routes.joinPaper);
+
+    const leave = (paperId: string, token = member.token) =>
+      call(leavePaper, {
+        method: "DELETE",
+        path: `/api/papers/${paperId}/membership`,
+        token,
+        params: { paperId },
+      });
+
+    await expectError(await leave(home, ama.token), 409, "conflict");
+    const { paperId, left } = await expectOk(await leave(extra), routes.leavePaper);
+    expect(left).toBe(true);
+    expect(paperId).toBe(extra);
+    await expectError(await leave(home), 409, "conflict");
+    await expectError(await leave(extra), 404, "not_found");
   });
 });
 

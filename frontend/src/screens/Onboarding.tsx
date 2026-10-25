@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { Cartoon } from '../components/Cartoon'
 import { SignBadge } from '../components/SignBadge'
 import { IconArrow, IconCamera, IconCheck, IconRefresh } from '../components/Icons'
@@ -87,6 +87,7 @@ export function lookFor(avatar: State['avatar']): Look {
 export function AvatarStep() {
   const nav = useNavigate()
   const { state, set, toast, refresh } = useStore()
+  const fromSettings = (useLocation().state as { from?: string } | null)?.from === 'settings'
   const [a, setA] = useState(state.avatar)
   const [selfie, setSelfie] = useState<string | null>(null)
   const [photoUrl, setPhotoUrl] = useState<string | null>(null)
@@ -155,7 +156,10 @@ export function AvatarStep() {
         set({ avatar: a, style: a.style, avatarUrl: drawnUrl })
       }
       await refresh()
-      nav('/onboarding/joined')
+      if (fromSettings) {
+        toast('Avatar updated')
+        nav('/settings')
+      } else nav('/onboarding/joined')
     } catch (e) {
       toast(userMessage(e))
     } finally {
@@ -165,8 +169,8 @@ export function AvatarStep() {
 
   return (
     <Screen dock={<button className="btn btn-primary" disabled={saving || drawing} onClick={() => void finish()}>{saving ? 'Saving…' : 'Looks like me!'}</button>}>
-      <MiniMast back="/onboarding/profile" />
-      <StepBar step={2} label="Your avatar" />
+      <MiniMast back={fromSettings ? '/settings' : '/onboarding/profile'} />
+      {!fromSettings && <StepBar step={2} label="Your avatar" />}
       <p className="kicker">Staff portrait</p>
       <h1 className="display">Become a cartoon</h1>
       <p className="lede">Take a selfie, pick an art style, and we'll draw the character who stars in your comic strip.</p>

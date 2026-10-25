@@ -69,6 +69,9 @@ export function toWeek(f: Forecast, now = new Date(), timeZone?: string): WeekDa
   })
 }
 
+/** Austin, used when the reader has no city or that city's forecast cannot be loaded. */
+export const AUSTIN_COORDS = { lat: '30.27', lon: '-97.74' }
+
 /** Celsius forecast from GET /api/weather, rounded for the paper's day cells. */
 export function fromWeather(report: WeatherReport, placeFallback: string): Forecast {
   return {

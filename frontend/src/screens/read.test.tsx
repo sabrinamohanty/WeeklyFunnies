@@ -150,6 +150,15 @@ describe('the edition', () => {
     await waitFor(() => expect(apiMock.publishEdition).toHaveBeenCalledWith('past-edition'))
   })
 
+  it('shows Austin when the reader’s forecast is missing', async () => {
+    apiMock.weather
+      .mockResolvedValueOnce({ weather: null })
+      .mockResolvedValueOnce({ weather: { ...austin, place: null, source: 'location' } })
+    show('/front', bundle(), { profile: { name: 'Ama', city: '', cityId: null, birthday: '1995-10-15' } })
+    expect(await screen.findByText('Austin · °C')).toBeTruthy()
+    expect(apiMock.weather).toHaveBeenLastCalledWith({ lat: '30.27', lon: '-97.74' })
+  })
+
   it('does not also show that draft once the edition is on the stands', async () => {
     show('/front', published())
     expect(await screen.findByRole('heading', { name: 'Public hed' })).toBeTruthy()

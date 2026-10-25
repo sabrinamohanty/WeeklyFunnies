@@ -42,6 +42,13 @@ export const updatePaperRequestSchema = z
   .strictObject({ name: paperName })
   .meta({ id: "UpdatePaperRequest", description: "Owner only." });
 
+export const leavePaperResponseSchema = z
+  .strictObject({
+    paperId: uuid,
+    left: z.literal(true),
+  })
+  .meta({ id: "LeftPaper" });
+
 export const paperResponseSchema = z.strictObject({ paper: paperSchema });
 export const paperDetailResponseSchema = z.strictObject({ paper: paperDetailSchema });
 export const papersResponseSchema = z.strictObject({ papers: z.array(paperSchema) });

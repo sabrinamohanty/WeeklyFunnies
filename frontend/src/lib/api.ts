@@ -86,6 +86,8 @@ export const api = {
     request<{ paper: ApiPaper }>('/api/papers', { method: 'POST', body: JSON.stringify({ name }) }),
   createInvite: (paperId: string) =>
     request<{ invite: CreatedInvite }>(`/api/papers/${paperId}/invites`, { method: 'POST', body: '{}' }),
+  leavePaper: (paperId: string) =>
+    request<{ paperId: string; left: true }>(`/api/papers/${paperId}/membership`, { method: 'DELETE' }),
   joinPaper: (code: string) =>
     request<{ paper: ApiPaper }>('/api/invites/join', { method: 'POST', body: JSON.stringify({ code }) }),
 

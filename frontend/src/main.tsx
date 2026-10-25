@@ -7,6 +7,7 @@ import { AvatarStep, Joined, Profile } from './screens/Onboarding'
 import { Comics, Front, Stars } from './screens/Read'
 import { ChoosePapers, Review, WriteHighlights } from './screens/MyWeek'
 import { BackIssues, JoinPaper, Papers } from './screens/Papers'
+import { Settings } from './screens/Settings'
 import './styles.css'
 
 function ScrollToTop() {
@@ -55,6 +56,7 @@ function App() {
             <Route path="/papers" element={<Papers />} />
             <Route path="/papers/join" element={<JoinPaper />} />
             <Route path="/back-issues" element={<BackIssues />} />
+            <Route path="/settings" element={<Settings />} />
           </Route>
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />

@@ -5,16 +5,17 @@ import { PublishedStoryCard } from '../components/EditionStories'
 import { SignBadge } from '../components/SignBadge'
 import { IconCake, IconCamera, IconChevron, SkyIcon } from '../components/Icons'
 import { Lightbox, type LightboxItem } from '../components/Lightbox'
-import { BRAND, Halftone, Logo, Screen, ThemeToggle, useCountdown } from '../components/ui'
+import { BRAND, Halftone, Logo, MiniMast, Screen, ThemeToggle, useCountdown } from '../components/ui'
 import { edition, dayOfMonth, monthDayLabel, signFor, signReadings, swatchCycle, weekLabelFromIso, zodiac } from '../data'
 import { api, userMessage } from '../lib/api'
 import { draftStoriesForPaper, editionsReadyToPublish, frontEmptyState, lightboxItems, showOwnDraftComic } from '../lib/page-flow'
 import { ApiError, type EditionBundle, type EditionSummary, type PublishedPage } from '../lib/types'
 import { useActivePaper, useEditionBundle, useStore } from '../store'
-import { browserCoords, fromWeather, toWeek, type Forecast } from '../weather'
+import { AUSTIN_COORDS, browserCoords, fromWeather, toWeek, type Forecast } from '../weather'
 import { CityPicker } from '../components/CityPicker'
 import { lookFor } from './Onboarding'
 import { LogOut } from './Papers'
+import { SettingsButton } from './Settings'
 
 function memberOf(bundle: EditionBundle, userId: string) {
   return bundle.members.find(m => m.userId === userId) ?? null
@@ -40,7 +41,7 @@ export function Front() {
       <header className="masthead">
         <div className="meta-row">
           <span>Vol. 1 · No. {bundle?.edition.issueNumber ?? 1}</span>
-          <ThemeToggle />
+          <span className="meta-actions"><ThemeToggle /><SettingsButton /></span>
         </div>
         <h1 className="nameplate"><Logo size="lg" /></h1>
         <div className="double-rule" />
@@ -173,20 +174,40 @@ function WeatherWeek() {
     void (async () => {
       try {
         const coords = await browserCoords()
-        const { weather } = await api.weather(coords ?? undefined)
+        let { weather } = await api.weather(coords ?? undefined)
+        let austin = false
+        if (!weather) {
+          weather = (await api.weather(AUSTIN_COORDS)).weather
+          austin = true
+        }
         if (!alive) return
         if (!weather) {
-          setStatus(state.profile.city ? 'Weather is unavailable for that city.' : '')
+          setStatus('Weather is unavailable right now.')
           return
         }
-        const where = weather.place ?? 'Near you'
+        const where = austin ? 'Austin' : (weather.place ?? 'Near you')
         setLive({
           forecast: fromWeather(weather, where),
           timeZone: weather.timezone,
-          status: weather.source === 'location' ? 'Near you · °C' : '°C',
+          status: austin ? 'Austin · °C' : weather.source === 'location' ? 'Near you · °C' : '°C',
         })
       } catch {
-        if (alive) setStatus('Weather is unavailable right now.')
+        if (!alive) return
+        try {
+          const { weather } = await api.weather(AUSTIN_COORDS)
+          if (!alive) return
+          if (!weather) {
+            setStatus('Weather is unavailable right now.')
+            return
+          }
+          setLive({
+            forecast: fromWeather(weather, 'Austin'),
+            timeZone: weather.timezone,
+            status: 'Austin · °C',
+          })
+        } catch {
+          if (alive) setStatus('Weather is unavailable right now.')
+        }
       }
     })()
     return () => { alive = false }
@@ -207,7 +228,7 @@ function WeatherWeek() {
         <span className={`weather-status ${live ? '' : 'warn'}`}>{statusText}</span>
       </div>
 
-      {!forecast && !state.profile.city ? (
+      {!forecast && status !== 'Loading the forecast…' && !state.profile.city ? (
         <div className="wx-need">
           <p>Pick your city to see your weather.</p>
           <CityPicker id="wx-city" value="" onPick={pickCity} />
@@ -267,7 +288,7 @@ export function Comics() {
 
   return (
     <Screen tabs>
-      <header className="minimast rule-single solo"><Logo /></header>
+      <MiniMast rule="single" right={<SettingsButton />} />
       <h1 className="comic-title">Sunday Funnies</h1>
       <p className="note">{published ? 'Tap any panel to see the real photos' : 'Comics print after the editor publishes.'}</p>
 
@@ -340,7 +361,7 @@ export function Stars() {
 
   return (
     <Screen tabs>
-      <header className="minimast rule-single solo"><Logo /></header>
+      <MiniMast rule="single" right={<SettingsButton />} />
       <h1 className="display center">Stars &amp; Birthdays</h1>
       <p className="note">For entertainment only. Mostly.</p>
 

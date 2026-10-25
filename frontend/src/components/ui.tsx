@@ -1,14 +1,62 @@
-import { useEffect, useState, type HTMLAttributes, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type HTMLAttributes, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { NavLink, useNavigate } from 'react-router-dom'
+import { NavLink, useLocation, useNavigate } from 'react-router-dom'
+import { READING, capturePage, playTurn } from './pageTurn'
 import { IconBack, IconComics, IconFront, IconMoon, IconPencil, IconStar, IconSunSmall } from './Icons'
 import { useActivePaper, useIsDark, useStore } from '../store'
 import { type Swatch } from '../data'
 
 export function Screen({ children, tabs, dock, className = '' }: { children: ReactNode; tabs?: boolean; dock?: ReactNode; className?: string }) {
+  const main = useRef<HTMLElement>(null)
+  const { pathname } = useLocation()
+  const nav = useNavigate()
+
+  useLayoutEffect(() => {
+    playTurn(pathname)
+    const el = main.current
+    return () => capturePage(pathname, el)
+  }, [pathname])
+
+  useEffect(() => {
+    const at = READING.indexOf(pathname)
+    if (at < 0) return
+    const turn = (step: number) => {
+      const to = READING[at + step]
+      if (to) nav(to)
+    }
+    const busy = (target: EventTarget | null) =>
+      !!document.querySelector('.lightbox, .press-overlay') ||
+      (target instanceof Element && !!target.closest('input, textarea, select, [contenteditable], .weather-scroll, .combo'))
+
+    let start: { x: number; y: number } | null = null
+    const onStart = (e: TouchEvent) => {
+      start = busy(e.target) || e.touches.length > 1 ? null : { x: e.touches[0]!.clientX, y: e.touches[0]!.clientY }
+    }
+    const onEnd = (e: TouchEvent) => {
+      if (!start) return
+      const dx = e.changedTouches[0]!.clientX - start.x
+      const dy = e.changedTouches[0]!.clientY - start.y
+      start = null
+      if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) turn(dx < 0 ? 1 : -1)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.altKey || e.ctrlKey || e.metaKey || busy(e.target)) return
+      if (e.key === 'ArrowRight') turn(1)
+      if (e.key === 'ArrowLeft') turn(-1)
+    }
+    document.addEventListener('touchstart', onStart, { passive: true })
+    document.addEventListener('touchend', onEnd, { passive: true })
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('touchstart', onStart)
+      document.removeEventListener('touchend', onEnd)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [pathname, nav])
+
   return (
     <>
-      <main className={`screen ${tabs ? 'has-tabs' : ''} ${dock ? 'has-dock' : ''} ${className}`}>{children}</main>
+      <main ref={main} className={`screen ${tabs ? 'has-tabs' : ''} ${dock ? 'has-dock' : ''} ${className}`}>{children}</main>
       {dock && <div className="dock">{dock}</div>}
       {tabs && <TabBar />}
     </>
