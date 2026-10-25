@@ -1,0 +1,64 @@
+{
+  "friend": {
+    "id": "priya",
+    "name": "Priya",
+    "city": "Austin",
+    "style": "sketch",
+    "sign": "Gemini"
+  },
+  "stories": [
+    {
+      "highlightId": "h1",
+      "section": "Campus",
+      "headline": "Three Midterms Four Days One Cold Brew",
+      "article": "Priya survived three midterms in four days. Cold brew kept her going."
+    },
+    {
+      "highlightId": "h2",
+      "section": "Campus",
+      "headline": "Library Desk Officially Declares Residency",
+      "article": "Priya spent most of the week at one desk in the library. That desk got a lot of company."
+    }
+  ],
+  "strip": {
+    "title": "Midterm Week Survival",
+    "panels": [
+      {
+        "highlightId": "h2",
+        "scene": "Priya sitting at a single library desk with laptop and books, looking settled, medium wide shot from slightly behind with library shelves in background",
+        "dialogue": [
+          "This desk is mine now."
+        ],
+        "caption": "Home base established in the library.",
+        "mood": "smile"
+      },
+      {
+        "highlightId": "h2",
+        "scene": "Priya still at the same library desk at night, leaning on hand, tired but focused, close side angle",
+        "dialogue": [
+          "Still here. Still studying."
+        ],
+        "caption": "Many hours, one very loyal desk.",
+        "mood": "flat"
+      },
+      {
+        "highlightId": "h1",
+        "scene": "Priya walking in a campus hallway holding a cold brew cup, eyes wide and relieved, medium shot",
+        "dialogue": [
+          "Two down, one to go!"
+        ],
+        "caption": "Midterm marathon fueled by cold brew.",
+        "mood": "o"
+      },
+      {
+        "highlightId": "h1",
+        "scene": "Priya leaning back at her library desk with empty cold brew cup, smiling with relief, front-facing angle",
+        "dialogue": [
+          "I survived!"
+        ],
+        "caption": "Three midterms survived, celebration time.",
+        "mood": "grin"
+      }
+    ]
+  }
+}

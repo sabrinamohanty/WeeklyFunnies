@@ -1,0 +1,65 @@
+{
+  "friend": {
+    "id": "diego",
+    "name": "Diego",
+    "city": "Austin",
+    "style": "superhero",
+    "sign": "Libra"
+  },
+  "stories": [
+    {
+      "highlightId": "h1",
+      "section": "Pets",
+      "headline": "Biscuit Joins Diego's Family Tuesday",
+      "article": "Diego adopted a puppy from the shelter on Tuesday. The puppy is named Biscuit."
+    },
+    {
+      "highlightId": "h2",
+      "section": "Pets",
+      "headline": "Biscuit Conquers Zilker Park Saturday Morning",
+      "article": "Diego took Biscuit for a walk on Saturday morning. They went to Zilker Park together."
+    }
+  ],
+  "strip": {
+    "title": "Biscuit's First Big Week",
+    "panels": [
+      {
+        "highlightId": "h1",
+        "scene": "Inside animal shelter, Diego crouched down meeting a small puppy, smiling warmly, front angle, adoption counter in background",
+        "dialogue": [
+          "Hi Biscuit!",
+          "Ready to go home?"
+        ],
+        "caption": "Tuesday brought a very important adoption.",
+        "mood": "smile"
+      },
+      {
+        "highlightId": "h1",
+        "scene": "Outside shelter doorway in daylight, Diego walking out with puppy Biscuit on leash, happy expression, side angle",
+        "dialogue": [
+          "Welcome home, buddy."
+        ],
+        "caption": "One leash, one big new adventure begins.",
+        "mood": "grin"
+      },
+      {
+        "highlightId": "h2",
+        "scene": "Zilker Park trail on Saturday morning, open grass and trees behind, Diego walking puppy Biscuit on leash, side view, smiling",
+        "dialogue": [
+          "Let's explore, Biscuit!"
+        ],
+        "caption": "Saturday morning meant Zilker Park adventure time.",
+        "mood": "smile"
+      },
+      {
+        "highlightId": "h2",
+        "scene": "Zilker Park grassy area, Diego kneeling to pet puppy Biscuit after the walk, relaxed happy expression, eye-level angle",
+        "dialogue": [
+          "Good walk, huh?"
+        ],
+        "caption": "Zilker Park walk, officially approved by Biscuit.",
+        "mood": "grin"
+      }
+    ]
+  }
+}

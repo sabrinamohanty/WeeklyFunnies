@@ -1,0 +1,64 @@
+{
+  "friend": {
+    "id": "sam",
+    "name": "Sam",
+    "city": "Austin",
+    "style": "classic",
+    "sign": "Capricorn"
+  },
+  "stories": [
+    {
+      "highlightId": "h1",
+      "section": "News",
+      "headline": "Sam Lands Downtown Design Gig",
+      "article": "Sam started a new job as a junior designer at a downtown design studio on Monday."
+    },
+    {
+      "highlightId": "h2",
+      "section": "Life",
+      "headline": "Window Seat Wins First Day",
+      "article": "Sam got a desk by the window on his first day."
+    }
+  ],
+  "strip": {
+    "title": "New Job, Bright View",
+    "panels": [
+      {
+        "highlightId": "h1",
+        "scene": "Sam standing in the doorway of a downtown design studio on Monday morning, holding a tote bag, looking in with a hopeful smile, medium wide shot with desks visible in the background",
+        "dialogue": [
+          "Here we go!"
+        ],
+        "caption": "Monday meant a fresh start.",
+        "mood": "smile"
+      },
+      {
+        "highlightId": "h1",
+        "scene": "Sam inside the downtown design studio, taking in the workspace, hands holding his bag a little nervously, curious smile, eye-level angle",
+        "dialogue": [
+          "Junior designer, reporting for duty."
+        ],
+        "caption": "New job adventure begins downtown.",
+        "mood": "grin"
+      },
+      {
+        "highlightId": "h2",
+        "scene": "Sam arriving at a desk placed by a large window, looking pleasantly surprised, side angle showing bright window light",
+        "dialogue": [
+          "A window desk? Lucky me!"
+        ],
+        "caption": "First day brought a window desk.",
+        "mood": "smile"
+      },
+      {
+        "highlightId": "h2",
+        "scene": "Sam sitting at his desk by the window, unpacking a notebook, smiling contentedly, close-up over-the-shoulder angle toward the window",
+        "dialogue": [
+          "Best view in the house."
+        ],
+        "caption": "Settling in with a bright view.",
+        "mood": "grin"
+      }
+    ]
+  }
+}

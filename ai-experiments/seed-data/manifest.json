@@ -1,0 +1,42 @@
+[
+  {
+    "id": "lauren",
+    "name": "Lauren",
+    "style": "classic",
+    "sign": "Aries",
+    "folder": "seed-data/lauren",
+    "complete": true
+  },
+  {
+    "id": "diego",
+    "name": "Diego",
+    "style": "superhero",
+    "sign": "Libra",
+    "folder": "seed-data/diego",
+    "complete": true
+  },
+  {
+    "id": "maya",
+    "name": "Maya",
+    "style": "manga",
+    "sign": "Scorpio",
+    "folder": "seed-data/maya",
+    "complete": true
+  },
+  {
+    "id": "priya",
+    "name": "Priya",
+    "style": "sketch",
+    "sign": "Gemini",
+    "folder": "seed-data/priya",
+    "complete": true
+  },
+  {
+    "id": "sam",
+    "name": "Sam",
+    "style": "classic",
+    "sign": "Capricorn",
+    "folder": "seed-data/sam",
+    "complete": true
+  }
+]
