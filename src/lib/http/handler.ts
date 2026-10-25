@@ -132,7 +132,11 @@ export function defineRoute<C extends RouteContract>(
         userId = user.id;
         await enforceRateLimit(limiter, `user:${user.id}`, config.RATE_LIMIT_USER_PER_MINUTE);
         if (contract.rateLimit) {
-          await enforceRateLimit(limiter, `user:${user.id}:${routeId}`, contract.rateLimit.perUserPerMinute);
+          await enforceRateLimit(
+            limiter,
+            `user:${user.id}:${routeId}`,
+            Math.max(1, Math.ceil(contract.rateLimit.perUserPerMinute * config.RATE_LIMIT_ROUTE_SCALE)),
+          );
         }
       } else if (contract.auth === "cron") {
         verifyCronSecret(req, config.CRON_SECRET);

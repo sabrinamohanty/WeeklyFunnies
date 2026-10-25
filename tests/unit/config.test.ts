@@ -6,6 +6,7 @@ const base = {
   SUPABASE_ANON_KEY: "anon-key-placeholder-000000",
   SUPABASE_SERVICE_ROLE_KEY: "service-key-placeholder-0000",
   CRON_SECRET: "x".repeat(32),
+  INVITE_CODE_PEPPER: "p".repeat(32),
 };
 
 describe("getConfig", () => {
@@ -54,6 +55,18 @@ describe("getConfig", () => {
         AI_REAL_IMAGE_MODEL: "i",
       }),
     ).not.toThrow();
+  });
+
+  it("refuses scaled route limits in production", () => {
+    expect(() =>
+      getConfig({
+        ...base,
+        APP_ENV: "production",
+        MODERATION_PROVIDER: "real",
+        MODERATION_REAL_API_KEY: "k",
+        RATE_LIMIT_ROUTE_SCALE: "100",
+      }),
+    ).toThrow(/RATE_LIMIT_ROUTE_SCALE/);
   });
 
   it("refuses stub moderation in production", () => {

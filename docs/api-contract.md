@@ -1,6 +1,6 @@
 # Meanwhile API contract
 
-Version 0.1.0 (Phase 0). This is the contract the iOS app builds against.
+Version 0.2.0 (Phase 2). This is the contract the iOS app builds against.
 
 - **Source of truth:** the Zod schemas in `src/lib/contract/`. `docs/openapi.yaml` is generated from them
   (`pnpm openapi`), and a test fails if it drifts. Use the OpenAPI file to generate Swift models.
@@ -338,6 +338,13 @@ interface Moderator {
 ```
 
 ## Changelog
+
+- **0.2.0 (Phase 2):** auth, profile, papers and invites are live.
+  - `Member.name` is nullable, for members who haven't finished onboarding.
+  - `POST /api/papers/{paperId}/invites` allows at most 5 active invites per paper and returns
+    `409 conflict` beyond that.
+  - Unknown, expired and revoked invite codes all return the same `404 not_found`. Joining is idempotent
+    for existing members, and a full paper returns `409 conflict`.
 
 - **0.1.0 (Phase 0):** initial contract. Changes from the original brief, all agreed in planning:
   - Avatar generation is asynchronous (`202` and polling), with separate `regenerate` and `approve` routes,

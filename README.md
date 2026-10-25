@@ -8,15 +8,16 @@ The API behind **Meanwhile**, an iOS app that turns a group of friends' weekly h
 
 ## Status
 
-Phases 0 and 1 are done:
+Phases 0 to 2 are done:
 
 - the scaffold and API contract;
 - the database schema, four private storage buckets, and row-level security and storage policies, with
-  two-user integration tests.
+  two-user integration tests;
+- token verification, the profile (`/api/me`, `/api/geocode`), papers, members, invites and joining, with
+  Postgres-backed rate limits.
 
 Every endpoint exists and answers in the standard response and error shapes. Endpoints not yet built
-return `501 not_implemented`. Until Phase 2 adds token verification, user endpoints return `401`. See
-`NOTES.md` for the phase plan and database details.
+return `501 not_implemented`. See `NOTES.md` for the phase plan, database and auth details.
 
 ## Stack
 
@@ -71,7 +72,7 @@ src/app/api/        Route files. Each wraps one contract entry with defineRoute(
 src/proxy.ts        JSON 404 and 405 for unknown paths and methods.
 src/lib/contract/   Zod schemas and the route registry: the single source of truth.
 src/lib/http/       Request pipeline: auth, rate limits, validation, body limits, error envelope.
-src/lib/auth/       Token verification (Phase 2) and the cron secret check.
+src/lib/auth/       Token verification and the cron secret check.
 src/lib/ai/         AiService, AiProvider, and Moderator interfaces; providers arrive in Phase 3.
 src/lib/config/     Environment schema, validated at boot.
 src/lib/log/        Metadata-only structured logger.

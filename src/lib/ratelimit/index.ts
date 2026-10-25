@@ -1,3 +1,7 @@
+import { getConfig } from "@/lib/config/env";
+import { serviceDb } from "@/lib/db/client";
+import { PostgresRateLimiter } from "./postgres";
+
 export interface RateLimitResult {
   allowed: boolean;
   retryAfterSeconds: number;
@@ -7,10 +11,7 @@ export interface RateLimiter {
   consume(key: string, limit: number, windowMs: number): Promise<RateLimitResult>;
 }
 
-/**
- * Fixed-window limiter held in process memory. Only correct for a single process (local dev and
- * tests). Production uses the Postgres-backed limiter added in Phase 2.
- */
+/** Fixed-window limiter held in process memory. Only correct for a single process (tests, local dev). */
 export class MemoryRateLimiter implements RateLimiter {
   private readonly windows = new Map<string, { start: number; count: number }>();
 
@@ -34,6 +35,9 @@ export class MemoryRateLimiter implements RateLimiter {
 let defaultLimiter: RateLimiter | undefined;
 
 export function getRateLimiter(): RateLimiter {
-  defaultLimiter ??= new MemoryRateLimiter();
+  defaultLimiter ??=
+    getConfig().RATE_LIMIT_STORE === "postgres"
+      ? new PostgresRateLimiter(serviceDb)
+      : new MemoryRateLimiter();
   return defaultLimiter;
 }

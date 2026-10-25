@@ -2,7 +2,7 @@
 openapi: 3.1.0
 info:
   title: Meanwhile API
-  version: 0.1.0
+  version: 0.2.0
   description: Backend API for the Meanwhile iOS app. Generated from src/lib/contract. See docs/api-contract.md.
 servers:
   - url: http://localhost:3000
@@ -438,7 +438,10 @@ components:
           type: string
           format: uuid
         name:
-          type: string
+          type:
+            - string
+            - "null"
+          description: Null until the member finishes onboarding.
         city:
           type:
             - string
@@ -1877,7 +1880,7 @@ paths:
                 $ref: "#/components/schemas/ErrorEnvelope"
     post:
       operationId: createInvite
-      summary: Create a multi-use invite code valid for 7 days. Owner only.
+      summary: Create a multi-use invite code valid for 7 days. Owner only. At most 5 active at once.
       tags:
         - invites
       security:
@@ -1931,6 +1934,12 @@ paths:
                 $ref: "#/components/schemas/ErrorEnvelope"
         "404":
           description: not_found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "409":
+          description: conflict
           content:
             application/json:
               schema:

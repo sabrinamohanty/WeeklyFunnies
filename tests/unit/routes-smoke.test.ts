@@ -11,10 +11,8 @@ describe("Phase 0 routes", () => {
     expect(await res.json()).toEqual({ data: { status: "ok" } });
   });
 
-  it("user routes fail closed with 401 until token verification exists", async () => {
-    const res = await getMe(
-      new Request("http://localhost/api/me", { headers: { authorization: "Bearer anything" } }),
-    );
+  it("user routes answer 401 without a token, before any lookup", async () => {
+    const res = await getMe(new Request("http://localhost/api/me"));
     expect(res.status).toBe(401);
     expect(((await res.json()) as ErrorEnvelope).error.code).toBe("unauthorized");
   });

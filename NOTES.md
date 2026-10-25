@@ -6,8 +6,8 @@
 | ---------------------------------- | ----------- |
 | 0. Scaffold and contract           | Done        |
 | 1. Database, storage, RLS          | Done        |
-| 2. Auth, papers, membership        | Next        |
-| 3. AI placeholder layer and safety | Not started |
+| 2. Auth, papers, membership        | Done        |
+| 3. AI placeholder layer and safety | Next        |
 | 4. Core routes                     | Not started |
 | 5. Weather, birthdays, horoscopes  | Not started |
 | 6. Retention                       | Not started |
@@ -43,7 +43,31 @@ pnpm dev
 - `tests/fixtures/text-cases.ts`: shared text cases for every text route and the AI safety layer.
 - `supabase/migrations/`: schema (`…0100`), grants and row-level security (`…0200`), buckets and storage
   policies (`…0300`).
-- `tests/integration/`: two-user table tests, storage tests, and database invariant tests.
+- `supabase/migrations/…0400`: the rate-limit table and the `create_paper` and `join_paper` functions
+  (service role only).
+- `src/lib/db/`, `src/lib/papers/`, `src/lib/profile/`, `src/lib/geo/`: the service-key client, repos,
+  invite codes, and the Open-Meteo geocoder.
+- `tests/integration/`: two-user table tests, storage tests, database invariant tests, and API tests for
+  `me`, papers, invites, and joining.
+
+## Auth and papers (Phase 2)
+
+- **Auth:** every user route verifies the bearer token with Supabase Auth (`auth.getUser`), so tokens from
+  signed-out sessions and deleted users get `401`. If Supabase Auth itself is down, the API returns `500`
+  rather than letting the request through.
+- **Authorization order:** signed in, then member of the paper, then owner where needed. Papers you're not
+  in return `404` (never `403`), so ids can't be probed. Members hitting owner-only routes get `403`.
+- **Invite codes:** 12 Crockford base32 characters from a secure random source, shown once as
+  `XXXX-XXXX-XXXX`. Only an HMAC-SHA256 hash with `INVITE_CODE_PEPPER` is stored. Input ignores case,
+  spaces and dashes. At most 5 active invites per paper. Unknown, expired and revoked codes all give the
+  same `404`, and joining is limited to 5 attempts per minute per user.
+- **Profile city:** the app sends a geocode id; the server looks it up and stores name, country, timezone
+  and coordinates. Coordinates are never returned.
+- **Rate limits:** stored in Postgres (`RATE_LIMIT_STORE=postgres`), keyed by a sha256 hash, so limits
+  are shared across serverless instances. If the store is unreachable, requests are allowed and a
+  warning is logged (fail open).
+- **New env vars:** `INVITE_CODE_PEPPER` (required, at least 32 chars), `RATE_LIMIT_STORE`, and
+  `RATE_LIMIT_ROUTE_SCALE` (tests only; config refuses anything but 1 in production).
 
 ## Database (Phase 1)
 
@@ -126,8 +150,12 @@ None right now.
 
 - **Cron frequency:** Vercel Hobby runs crons at most once a day. The jobs sweep wants every minute, so it
   needs Vercel Pro, or Supabase `pg_cron` with `pg_net` calling the internal route.
-- **Rate limiter:** it's in memory until Phase 2, so it isn't shared across serverless instances.
-- **Placeholder auth:** user routes return 401 until Phase 2 adds token verification (fail closed).
+- **Rate-limit pruning:** `rate_limit_prune()` exists but isn't scheduled yet. The cron sweep should call
+  it (Phase 6).
+- **Rate limiter fails open:** a Postgres outage disables rate limits rather than blocking all traffic.
+  The IP and per-user limits come back as soon as the database does.
+- **Auth round trip:** each request calls Supabase Auth to check the session. That's what makes sign-out
+  take effect immediately, at the cost of some latency.
 - **Published-event deletes:** the database allows them so retention purges work. The API must block users
   from deleting published events (Phase 4).
 - **Storage outbox:** files queued in `storage_deletions` aren't removed until the Phase 6 worker exists.
@@ -136,4 +164,5 @@ None right now.
 
 ## Endpoint shape changes
 
-None since contract 0.1.0. See the changelog in `docs/api-contract.md`.
+Contract 0.2.0: `Member.name` is nullable, and invite creation is capped at 5 active invites
+(`409 conflict`). See the changelog in `docs/api-contract.md`.

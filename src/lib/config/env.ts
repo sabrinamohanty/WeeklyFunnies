@@ -42,9 +42,15 @@ export const envSchema = z
     AI_CIRCUIT_FAILURE_THRESHOLD: int(5, 1, 100),
     AI_CIRCUIT_COOLDOWN_MS: int(60_000, 1_000, 3_600_000),
 
-    // Request rate limits.
-    RATE_LIMIT_USER_PER_MINUTE: int(60, 1, 10_000),
-    RATE_LIMIT_IP_PER_MINUTE: int(120, 1, 10_000),
+    // Server-side secret mixed into invite code hashes, so a database leak doesn't reveal codes.
+    INVITE_CODE_PEPPER: z.string().min(32),
+
+    // Request rate limits. "memory" is only correct for a single process (tests, local dev).
+    RATE_LIMIT_STORE: z.enum(["postgres", "memory"]).default("postgres"),
+    RATE_LIMIT_USER_PER_MINUTE: int(60, 1, 100_000),
+    RATE_LIMIT_IP_PER_MINUTE: int(120, 1, 100_000),
+    // Multiplies per-route limits. Tests only; must be 1 in production.
+    RATE_LIMIT_ROUTE_SCALE: z.coerce.number().min(0.01).max(1_000).default(1),
 
     // Retention.
     RETENTION_WINDOW_DAYS: int(30, 1, 365),
@@ -70,6 +76,13 @@ export const envSchema = z
         code: "custom",
         path: ["MODERATION_REAL_API_KEY"],
         message: "required when MODERATION_PROVIDER=real",
+      });
+    }
+    if (env.APP_ENV === "production" && env.RATE_LIMIT_ROUTE_SCALE !== 1) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["RATE_LIMIT_ROUTE_SCALE"],
+        message: "must be 1 in production",
       });
     }
     if (env.APP_ENV === "production" && env.MODERATION_PROVIDER === "stub") {

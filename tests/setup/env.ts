@@ -7,6 +7,8 @@ const defaults: Record<string, string> = {
   SUPABASE_ANON_KEY: "test-anon-key-not-a-secret-0000",
   SUPABASE_SERVICE_ROLE_KEY: "test-service-role-key-not-a-secret",
   CRON_SECRET: "test-cron-secret-0123456789abcdef0123456789",
+  INVITE_CODE_PEPPER: "test-invite-pepper-0123456789abcdef012345",
+  RATE_LIMIT_STORE: "memory",
   AI_PROVIDER: "stub",
   MODERATION_PROVIDER: "stub",
 };

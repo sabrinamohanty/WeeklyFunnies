@@ -238,14 +238,14 @@ export const routes = {
   createInvite: route({
     method: "POST",
     path: "/api/papers/{paperId}/invites",
-    summary: "Create a multi-use invite code valid for 7 days. Owner only.",
+    summary: "Create a multi-use invite code valid for 7 days. Owner only. At most 5 active at once.",
     tag: "invites",
     auth: "user",
     phase: 2,
     params: paperIdParams,
     body: { kind: "json", schema: emptyBody },
     success: { status: 201, schema: createdInviteResponseSchema },
-    errors: ["forbidden", "not_found", ...AUTHED],
+    errors: ["forbidden", "not_found", "conflict", ...AUTHED],
     rateLimit: { perUserPerMinute: 10 },
   }),
   revokeInvite: route({

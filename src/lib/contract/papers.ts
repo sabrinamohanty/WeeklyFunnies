@@ -18,7 +18,7 @@ export const paperSchema = z
 export const memberSchema = z
   .strictObject({
     userId: uuid,
-    name: z.string(),
+    name: z.string().nullable().meta({ description: "Null until the member finishes onboarding." }),
     city: z.string().nullable().meta({ description: "City name only." }),
     zodiacSign: zodiacSignSchema.nullable(),
     avatarUrl: signedUrl.nullable(),
