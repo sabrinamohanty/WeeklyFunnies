@@ -1,0 +1,12 @@
+
+panel-*.png
+full-*.png
+strip-*.png
+story-*.json
+preview-*.html
+redraw-strip.mjs
+letter.mjs
+.env.local
+node_modules
+selfie*
+avatar*.png
