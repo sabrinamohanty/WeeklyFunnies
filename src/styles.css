@@ -646,3 +646,13 @@ button.panel:hover { transform: scale(1.04) rotate(-1deg); z-index: 1; }
 .wx-source .link, .wx-need .link { font-style: normal; font-size: 14px; padding: 0; }
 .wx-need { display: flex; flex-direction: column; gap: 10px; padding: 6px 0 4px; }
 .wx-need p { font-size: 16px; }
+
+/* ───────────── Page turn ───────────── */
+/* The outgoing screen peels away from a bottom corner, like a sticky note or a book page. */
+.page-turn { position: fixed; top: 0; bottom: 0; z-index: 45; pointer-events: none; overflow: hidden; }
+.page-leaf { position: absolute; inset: 0; background: var(--paper); overflow: hidden; will-change: clip-path; }
+.page-leaf .page-copy { position: absolute; left: 0; right: 0; margin: 0; }
+.page-leaf *, .page-leaf *::before, .page-leaf *::after { animation: none !important; transition: none !important; }
+.page-peel { position: absolute; inset: 0; overflow: visible; }
+/* The back of the paper. */
+.page-flap { fill: var(--card); }
