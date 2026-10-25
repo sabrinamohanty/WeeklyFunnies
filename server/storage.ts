@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { config } from './config.ts'
-import type { ImageBytes } from './meta.ts'
+import { sniffMime, type ImageBytes } from './meta.ts'
 
 const MIME_BY_EXT: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', webp: 'image/webp' }
 
@@ -26,5 +26,8 @@ export async function findImage(key: string): Promise<string | null> {
 export async function loadImage(publicPath: string): Promise<ImageBytes | null> {
   const m = /^\/generated\/([a-f0-9]{40})\.(png|jpg|webp)$/.exec(publicPath)
   if (!m) return null
-  try { return { bytes: await readFile(new URL(`${m[1]}.${m[2]}`, config.imageDir)), mimeType: MIME_BY_EXT[m[2]!]! } } catch { return null }
+  try {
+    const bytes = await readFile(new URL(`${m[1]}.${m[2]}`, config.imageDir))
+    return { bytes, mimeType: sniffMime(bytes, MIME_BY_EXT[m[2]!]!) }
+  } catch { return null }
 }
