@@ -50,6 +50,12 @@ built yet return `501 not_implemented`.
   smoke tests behind `AI_LIVE_TESTS=1`; spend limits at the providers. Account deletion is deferred until
   an App Store or public launch.
 
+## Contract notes for the frontend
+
+- **Contract 0.3.0:** blocked-content errors now include `details`, with issue `content_blocked` or
+  `self_harm_support`. The self-harm case sends a fixed supportive message the app should show with
+  support resources.
+
 ## Stack
 
 - **API:** TypeScript and Next.js 16 route handlers, deployable on Vercel. There are no pages in this repo.
@@ -78,7 +84,7 @@ pnpm dev                        # http://localhost:3000
 curl localhost:3000/api/health  # {"status":"ok"}
 ```
 
-To call the API from the web app in local development, run the frontend on another port (for example 3001) and set `CORS_ALLOWED_ORIGINS=http://localhost:3001` in `.env.local`.
+To call the API from the web app in local development, run the frontend on its Vite dev port (5173) and set `CORS_ALLOWED_ORIGINS=http://localhost:5173` in `.env.local`.
 
 ## Checking the database locally
 
