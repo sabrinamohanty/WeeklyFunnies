@@ -26,8 +26,7 @@ describe("user B (Ben) cannot read user A's paper", () => {
       ["papers", "id", w.paperA],
       ["paper_members", "paper_id", w.paperA],
       ["editions", "paper_id", w.paperA],
-      ["events", "paper_id", w.paperA],
-      ["photos", "paper_id", w.paperA],
+      ["page_papers", "paper_id", w.paperA],
     ] as const) {
       const { data, error } = await w.ben.client.from(table).select(column).eq(column, value);
       expect(error, table).toBeNull();
@@ -35,8 +34,9 @@ describe("user B (Ben) cannot read user A's paper", () => {
     }
   });
 
-  it("cannot read Ama's events or photos by id (IDOR)", async () => {
-    expect((await w.ben.client.from("events").select("id").eq("id", w.amaPublishedEvent)).data).toEqual([]);
+  it("cannot read Ama's pages, stories, or photos by id (IDOR)", async () => {
+    expect((await w.ben.client.from("pages").select("id").eq("id", w.amaPublishedPage)).data).toEqual([]);
+    expect((await w.ben.client.from("stories").select("id").eq("id", w.amaPublishedStory)).data).toEqual([]);
     expect((await w.ben.client.from("photos").select("id").eq("id", w.photoIds.amaPublished)).data).toEqual(
       [],
     );
@@ -49,14 +49,15 @@ describe("user B (Ben) cannot read user A's paper", () => {
 });
 
 describe("sensitive columns are never readable directly, even on your own rows", () => {
-  it("denies storage paths, source text, birthdays, coordinates, and session state", async () => {
+  it("denies storage paths, highlight text, panel scenes, birthdays, coordinates, and session state", async () => {
     const c = w.ama.client;
     const denied = [
-      await c.from("events").select("source_text").eq("id", w.amaDraftEvent),
-      await c.from("events").select("panel_path").eq("id", w.amaDraftEvent),
-      await c.from("events").select("panel_spec").eq("id", w.amaDraftEvent),
-      await c.from("events").select("*"),
+      await c.from("highlights").select("text").eq("id", w.amaDraftHighlight),
       await c.from("photos").select("storage_path"),
+      await c.from("panels").select("storage_path"),
+      await c.from("panels").select("scene"),
+      await c.from("highlights").select("*"),
+      await c.from("photos").select("*"),
       await c.from("profiles").select("birthday").eq("id", w.ama.id),
       await c.from("profiles").select("lat, lng").eq("id", w.ama.id),
       await c.from("profiles").select("avatar_path").eq("id", w.ama.id),
@@ -80,11 +81,11 @@ describe("co-member C (Cole) in paper A", () => {
     );
   });
 
-  it("sees Ama's published event and photo, but not her drafts", async () => {
-    expect(ids((await w.cole.client.from("events").select("id")).data)).toEqual(
-      [w.amaPublishedEvent, w.coleDraftEvent].sort(),
-    );
+  it("sees Ama's published story and photo, but not her drafts or highlight text", async () => {
+    expect(ids((await w.cole.client.from("stories").select("id")).data)).toEqual([w.amaPublishedStory]);
     expect(ids((await w.cole.client.from("photos").select("id")).data)).toEqual([w.photoIds.amaPublished]);
+    expect(ids((await w.cole.client.from("pages").select("id")).data)).toEqual([w.coleDraftPage]);
+    expect(ids((await w.cole.client.from("highlights").select("id")).data)).toEqual([w.coleDraftHighlight]);
   });
 
   it("cannot read Ama's profile row (birthday, coordinates) directly", async () => {
@@ -97,13 +98,19 @@ describe("co-member C (Cole) in paper A", () => {
 });
 
 describe("owner A (Ama)", () => {
-  it("sees her own drafts and published events", async () => {
-    const own = (await w.ama.client.from("events").select("id").eq("user_id", w.ama.id)).data;
-    expect(ids(own)).toEqual([w.amaDraftEvent, w.amaPublishedEvent].sort());
+  it("sees her own pages and draft stories", async () => {
+    const own = (await w.ama.client.from("pages").select("id")).data;
+    expect(ids(own)).toEqual([w.amaDraftPage, w.amaPublishedPage].sort());
+    expect(ids((await w.ama.client.from("stories").select("id")).data)).toEqual(
+      [w.amaDraftStory, w.amaPublishedStory].sort(),
+    );
   });
 
-  it("does not see Cole's draft", async () => {
-    expect((await w.ama.client.from("events").select("id").eq("id", w.coleDraftEvent)).data).toEqual([]);
+  it("does not see Cole's draft story or page", async () => {
+    expect((await w.ama.client.from("pages").select("id").eq("id", w.coleDraftPage)).data).toEqual([]);
+    expect((await w.ama.client.from("highlights").select("id").eq("id", w.coleDraftHighlight)).data).toEqual(
+      [],
+    );
   });
 
   it("sees her invites, but never the code hash", async () => {
@@ -120,17 +127,24 @@ describe("owner A (Ama)", () => {
 });
 
 describe("direct writes are denied (all writes go through the API)", () => {
-  it("cannot insert, update, or delete papers, editions, events, or members", async () => {
+  it("cannot insert, update, or delete papers, editions, pages, or members", async () => {
     const c = w.ama.client;
     const attempts = [
       await c.from("papers").insert({ name: "x", created_by: w.ama.id }),
       await c.from("papers").update({ name: "x" }).eq("id", w.paperA),
       await c.from("editions").update({ status: "published" }).eq("id", w.draftA),
-      await c.from("events").update({ headline: "unmoderated", approved: true }).eq("id", w.amaDraftEvent),
-      await c.from("events").delete().eq("id", w.amaDraftEvent),
+      await c.from("pages").update({ status: "approved" }).eq("id", w.amaDraftPage),
+      await c.from("stories").update({ headline: "unmoderated" }).eq("id", w.amaDraftStory),
+      await c.from("highlights").delete().eq("id", w.amaDraftHighlight),
       await c.from("paper_members").insert({ paper_id: w.paperB, user_id: w.ama.id }),
       await c.from("profiles").update({ avatar_path: null }).eq("id", w.ama.id),
       await c.from("horoscopes").insert({ sign: "leo", week_start: "2026-10-19", text: "x" }),
+      await c.from("reactions").insert({
+        edition_id: w.publishedA,
+        story_id: w.amaPublishedStory,
+        user_id: w.ama.id,
+        reaction: "ha",
+      }),
     ];
     for (const a of attempts) expect(a.error?.code).toBe("42501");
   });
@@ -154,7 +168,7 @@ describe("direct writes are denied (all writes go through the API)", () => {
 
 describe("anon and bad tokens", () => {
   it("anon reads nothing", async () => {
-    for (const table of ["papers", "events", "photos", "profiles", "horoscopes"]) {
+    for (const table of ["papers", "pages", "stories", "photos", "profiles", "horoscopes"]) {
       const { data } = await anonClient().from(table).select("*");
       expect(data ?? [], table).toEqual([]);
     }

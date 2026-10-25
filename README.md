@@ -16,7 +16,7 @@ interfaces described below.
 | 1     | Database schema, private storage buckets, row-level security and storage policies       | Done        | `phase-1`   |
 | 2     | Auth (token verification), profile and geocoding, papers, invites, joining, rate limits | Done        | `phase-2-3` |
 | 3     | AI layer and safety behind the stub provider, aligned with the web app                  | Done        | `phase-2-3` |
-| 4     | Core routes and data: pages, highlights, photos, avatars, panels, editions, reactions   | Next        | `phase-4-5` |
+| 4     | Core routes and data: pages, highlights, photos, avatars, panels, editions, reactions   | Done        | `phase-4-5` |
 | 5     | Non-AI content: weather, birthdays, horoscopes                                          | Not started | `phase-4-5` |
 | 6     | Retention: sliding expiry, logout purge, cleanup cron                                   | Not started | `phase-6-7` |
 | 7     | Seed data for the frontend, end-to-end check with the web app, docs                     | Not started | `phase-6-7` |
@@ -27,15 +27,10 @@ built yet return `501 not_implemented`.
 
 ### What's left, phase by phase
 
-- **Phase 4: core routes and data.**
-  - Database: weekly pages linked to papers, highlights (from `events`), stories and panels with image
-    status, reactions, saved editions, and avatar photos, with row-level security and two-user tests.
-  - Uploads: content sniffing, size and dimension limits, re-encoding, EXIF and GPS stripping, photo
-    moderation.
-  - Routes: `/api/pages/*` (papers, highlights, generate, rewrite, panels with the image cache and
-    per-page caps, reorder, approve), photos, `POST /api/avatar/photo`, `GET`/`POST /api/avatar`, editions
-    and back issues, the edition bundle with signed URLs, deadline locks, publishing (owner, after the
-    deadline), saving, and reactions.
+- **Phase 4: core routes and data.** Done on `phase-4-5`. Weekly pages linked to papers; highlights,
+  stories, panels, reactions, and saved editions; uploads re-encoded with metadata stripped; generate,
+  rewrite, draw, approve, publish (owner, after the deadline), save, and reactions. Horoscopes and
+  weather stay for Phase 5.
 - **Phase 5: non-AI content.** `GET /api/weather` from Open-Meteo (browser location or profile city,
   coordinates rounded and never stored); the birthdays query for the edition week; weekly horoscopes per
   sign through the AI layer, with a fallback line and a server-computed lucky number.

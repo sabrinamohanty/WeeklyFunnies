@@ -1,4 +1,7 @@
 import { routes } from "@/lib/contract/routes";
-import { notImplemented } from "@/lib/http/handler";
+import { defineRoute } from "@/lib/http/handler";
+import { currentPaperEdition } from "@/lib/editions/repo";
 
-export const GET = notImplemented(routes.currentEdition);
+export const GET = defineRoute(routes.currentEdition, async ({ user, params }) => ({
+  data: { edition: await currentPaperEdition(params.paperId, user.id) },
+}));

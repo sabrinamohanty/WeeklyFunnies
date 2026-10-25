@@ -40,8 +40,8 @@ describe("storage: user B (Ben) cannot reach user A's files", () => {
     }
   });
 
-  it("cannot list paper A's folder", async () => {
-    const { data } = await w.ben.client.storage.from("photos").list(`${w.paperA}/${w.ama.id}`);
+  it("cannot list Ama's folder", async () => {
+    const { data } = await w.ben.client.storage.from("photos").list(w.ama.id);
     expect(data ?? []).toEqual([]);
   });
 });
@@ -78,10 +78,7 @@ describe("storage: owner A (Ama)", () => {
 
   it("cannot upload, overwrite, or delete objects directly", async () => {
     for (const bucket of ["photos", "panels", "avatars", "selfies"]) {
-      const path =
-        bucket === "avatars" || bucket === "selfies"
-          ? `${w.ama.id}/direct.png`
-          : `${w.paperA}/${w.ama.id}/direct.png`;
+      const path = `${w.ama.id}/direct.png`;
       const { error } = await w.ama.client.storage
         .from(bucket)
         .upload(path, PNG_BYTES, { contentType: "image/png" });

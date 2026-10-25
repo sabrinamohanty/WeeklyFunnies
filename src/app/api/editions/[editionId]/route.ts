@@ -1,4 +1,7 @@
 import { routes } from "@/lib/contract/routes";
-import { notImplemented } from "@/lib/http/handler";
+import { defineRoute } from "@/lib/http/handler";
+import { getEditionBundle } from "@/lib/editions/repo";
 
-export const GET = notImplemented(routes.getEditionBundle);
+export const GET = defineRoute(routes.getEditionBundle, async ({ user, params }) => ({
+  data: { bundle: await getEditionBundle(params.editionId, user.id) },
+}));

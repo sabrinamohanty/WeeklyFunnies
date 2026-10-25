@@ -1,4 +1,7 @@
 import { routes } from "@/lib/contract/routes";
-import { notImplemented } from "@/lib/http/handler";
+import { defineRoute } from "@/lib/http/handler";
+import { reorderHighlights } from "@/lib/pages/repo";
 
-export const PUT = notImplemented(routes.reorderHighlights);
+export const PUT = defineRoute(routes.reorderHighlights, async ({ user, params, body }) => ({
+  data: { page: await reorderHighlights(params.pageId, user.id, body.highlightIds) },
+}));

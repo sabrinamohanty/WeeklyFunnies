@@ -76,8 +76,10 @@ export type Database = {
           created_at: string;
           expires_at: string | null;
           id: string;
+          issue_number: number;
           paper_id: string;
           published_at: string | null;
+          saved_at: string | null;
           status: Database["public"]["Enums"]["edition_status"];
           updated_at: string;
           week_end: string | null;
@@ -88,8 +90,10 @@ export type Database = {
           created_at?: string;
           expires_at?: string | null;
           id?: string;
+          issue_number?: number;
           paper_id: string;
           published_at?: string | null;
+          saved_at?: string | null;
           status?: Database["public"]["Enums"]["edition_status"];
           updated_at?: string;
           week_end?: never;
@@ -99,8 +103,10 @@ export type Database = {
           created_at?: string;
           expires_at?: string | null;
           id?: string;
+          issue_number?: number;
           paper_id?: string;
           published_at?: string | null;
+          saved_at?: string | null;
           status?: Database["public"]["Enums"]["edition_status"];
           updated_at?: string;
           week_end?: never;
@@ -116,85 +122,51 @@ export type Database = {
           },
         ];
       };
-      events: {
+      highlights: {
         Row: {
-          approved: boolean;
-          article: string;
           created_at: string;
-          edition_id: string;
-          expires_at: string;
-          headline: string;
           id: string;
           in_comic: boolean;
           notices: string[];
-          panel_error: string | null;
-          panel_path: string | null;
-          panel_spec: Json | null;
-          panel_status: Database["public"]["Enums"]["generation_status"];
-          paper_id: string;
+          page_id: string;
           position: number;
           serious: boolean;
-          source_text: string;
+          text: string;
           updated_at: string;
           user_id: string;
         };
         ComputedFields: never;
         Insert: {
-          approved?: boolean;
-          article: string;
           created_at?: string;
-          edition_id: string;
-          expires_at: string;
-          headline: string;
           id?: string;
           in_comic?: boolean;
           notices?: string[];
-          panel_error?: string | null;
-          panel_path?: string | null;
-          panel_spec?: Json | null;
-          panel_status?: Database["public"]["Enums"]["generation_status"];
-          paper_id: string;
+          page_id: string;
           position: number;
           serious?: boolean;
-          source_text: string;
+          text: string;
           updated_at?: string;
           user_id: string;
         };
         Update: {
-          approved?: boolean;
-          article?: string;
           created_at?: string;
-          edition_id?: string;
-          expires_at?: string;
-          headline?: string;
           id?: string;
           in_comic?: boolean;
           notices?: string[];
-          panel_error?: string | null;
-          panel_path?: string | null;
-          panel_spec?: Json | null;
-          panel_status?: Database["public"]["Enums"]["generation_status"];
-          paper_id?: string;
+          page_id?: string;
           position?: number;
           serious?: boolean;
-          source_text?: string;
+          text?: string;
           updated_at?: string;
           user_id?: string;
         };
         Relationships: [
           {
-            foreignKeyName: "events_edition_id_paper_id_fkey";
-            columns: ["edition_id", "paper_id"];
+            foreignKeyName: "highlights_page_id_user_id_fkey";
+            columns: ["page_id", "user_id"];
             isOneToOne: false;
-            referencedRelation: "editions";
-            referencedColumns: ["id", "paper_id"];
-          },
-          {
-            foreignKeyName: "events_paper_id_user_id_fkey";
-            columns: ["paper_id", "user_id"];
-            isOneToOne: false;
-            referencedRelation: "paper_members";
-            referencedColumns: ["paper_id", "user_id"];
+            referencedRelation: "pages";
+            referencedColumns: ["id", "user_id"];
           },
         ];
       };
@@ -266,6 +238,171 @@ export type Database = {
             isOneToOne: false;
             referencedRelation: "papers";
             referencedColumns: ["id"];
+          },
+        ];
+      };
+      page_papers: {
+        Row: {
+          edition_id: string;
+          page_id: string;
+          paper_id: string;
+          user_id: string;
+        };
+        ComputedFields: never;
+        Insert: {
+          edition_id: string;
+          page_id: string;
+          paper_id: string;
+          user_id: string;
+        };
+        Update: {
+          edition_id?: string;
+          page_id?: string;
+          paper_id?: string;
+          user_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "page_papers_edition_id_paper_id_fkey";
+            columns: ["edition_id", "paper_id"];
+            isOneToOne: false;
+            referencedRelation: "editions";
+            referencedColumns: ["id", "paper_id"];
+          },
+          {
+            foreignKeyName: "page_papers_page_id_user_id_fkey";
+            columns: ["page_id", "user_id"];
+            isOneToOne: false;
+            referencedRelation: "pages";
+            referencedColumns: ["id", "user_id"];
+          },
+          {
+            foreignKeyName: "page_papers_paper_id_user_id_fkey";
+            columns: ["paper_id", "user_id"];
+            isOneToOne: false;
+            referencedRelation: "paper_members";
+            referencedColumns: ["paper_id", "user_id"];
+          },
+        ];
+      };
+      pages: {
+        Row: {
+          approved_at: string | null;
+          comic_title: string | null;
+          created_at: string;
+          generated_at: string | null;
+          id: string;
+          notices: string[];
+          redraws_used: number;
+          regenerations_used: number;
+          rewrites_used: number;
+          status: Database["public"]["Enums"]["page_status"];
+          style: string;
+          updated_at: string;
+          user_id: string;
+          week_end: string | null;
+          week_start: string;
+        };
+        ComputedFields: never;
+        Insert: {
+          approved_at?: string | null;
+          comic_title?: string | null;
+          created_at?: string;
+          generated_at?: string | null;
+          id?: string;
+          notices?: string[];
+          redraws_used?: number;
+          regenerations_used?: number;
+          rewrites_used?: number;
+          status?: Database["public"]["Enums"]["page_status"];
+          style?: string;
+          updated_at?: string;
+          user_id: string;
+          week_end?: never;
+          week_start: string;
+        };
+        Update: {
+          approved_at?: string | null;
+          comic_title?: string | null;
+          created_at?: string;
+          generated_at?: string | null;
+          id?: string;
+          notices?: string[];
+          redraws_used?: number;
+          regenerations_used?: number;
+          rewrites_used?: number;
+          status?: Database["public"]["Enums"]["page_status"];
+          style?: string;
+          updated_at?: string;
+          user_id?: string;
+          week_end?: never;
+          week_start?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "pages_user_id_fkey";
+            columns: ["user_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      panels: {
+        Row: {
+          caption: string | null;
+          dialogue: NonNullable<Json>;
+          error: string | null;
+          highlight_id: string;
+          idx: number;
+          page_id: string;
+          scene: string;
+          status: Database["public"]["Enums"]["generation_status"];
+          storage_path: string | null;
+          updated_at: string;
+          user_id: string;
+        };
+        ComputedFields: never;
+        Insert: {
+          caption?: string | null;
+          dialogue?: NonNullable<Json>;
+          error?: string | null;
+          highlight_id: string;
+          idx: number;
+          page_id: string;
+          scene: string;
+          status?: Database["public"]["Enums"]["generation_status"];
+          storage_path?: string | null;
+          updated_at?: string;
+          user_id: string;
+        };
+        Update: {
+          caption?: string | null;
+          dialogue?: NonNullable<Json>;
+          error?: string | null;
+          highlight_id?: string;
+          idx?: number;
+          page_id?: string;
+          scene?: string;
+          status?: Database["public"]["Enums"]["generation_status"];
+          storage_path?: string | null;
+          updated_at?: string;
+          user_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "panels_highlight_id_user_id_fkey";
+            columns: ["highlight_id", "user_id"];
+            isOneToOne: false;
+            referencedRelation: "highlights";
+            referencedColumns: ["id", "user_id"];
+          },
+          {
+            foreignKeyName: "panels_page_id_user_id_fkey";
+            columns: ["page_id", "user_id"];
+            isOneToOne: false;
+            referencedRelation: "pages";
+            referencedColumns: ["id", "user_id"];
           },
         ];
       };
@@ -343,11 +480,9 @@ export type Database = {
         Row: {
           byte_size: number;
           created_at: string;
-          event_id: string;
-          expires_at: string;
           height: number;
+          highlight_id: string;
           id: string;
-          paper_id: string;
           position: number;
           storage_path: string;
           user_id: string;
@@ -357,11 +492,9 @@ export type Database = {
         Insert: {
           byte_size: number;
           created_at?: string;
-          event_id: string;
-          expires_at: string;
           height: number;
+          highlight_id: string;
           id?: string;
-          paper_id: string;
           position: number;
           storage_path: string;
           user_id: string;
@@ -370,11 +503,9 @@ export type Database = {
         Update: {
           byte_size?: number;
           created_at?: string;
-          event_id?: string;
-          expires_at?: string;
           height?: number;
+          highlight_id?: string;
           id?: string;
-          paper_id?: string;
           position?: number;
           storage_path?: string;
           user_id?: string;
@@ -382,11 +513,11 @@ export type Database = {
         };
         Relationships: [
           {
-            foreignKeyName: "photos_event_id_paper_id_user_id_fkey";
-            columns: ["event_id", "paper_id", "user_id"];
+            foreignKeyName: "photos_highlight_id_user_id_fkey";
+            columns: ["highlight_id", "user_id"];
             isOneToOne: false;
-            referencedRelation: "events";
-            referencedColumns: ["id", "paper_id", "user_id"];
+            referencedRelation: "highlights";
+            referencedColumns: ["id", "user_id"];
           },
         ];
       };
@@ -476,6 +607,53 @@ export type Database = {
         };
         Relationships: [];
       };
+      reactions: {
+        Row: {
+          created_at: string;
+          edition_id: string;
+          reaction: Database["public"]["Enums"]["reaction_kind"];
+          story_id: string;
+          user_id: string;
+        };
+        ComputedFields: never;
+        Insert: {
+          created_at?: string;
+          edition_id: string;
+          reaction: Database["public"]["Enums"]["reaction_kind"];
+          story_id: string;
+          user_id: string;
+        };
+        Update: {
+          created_at?: string;
+          edition_id?: string;
+          reaction?: Database["public"]["Enums"]["reaction_kind"];
+          story_id?: string;
+          user_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "reactions_edition_id_fkey";
+            columns: ["edition_id"];
+            isOneToOne: false;
+            referencedRelation: "editions";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "reactions_story_id_fkey";
+            columns: ["story_id"];
+            isOneToOne: false;
+            referencedRelation: "stories";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "reactions_user_id_fkey";
+            columns: ["user_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       storage_deletions: {
         Row: {
           attempts: number;
@@ -498,6 +676,52 @@ export type Database = {
         };
         Relationships: [];
       };
+      stories: {
+        Row: {
+          body: string;
+          headline: string;
+          highlight_id: string;
+          id: string;
+          page_id: string;
+          section: string;
+          user_id: string;
+        };
+        ComputedFields: never;
+        Insert: {
+          body: string;
+          headline: string;
+          highlight_id: string;
+          id?: string;
+          page_id: string;
+          section: string;
+          user_id: string;
+        };
+        Update: {
+          body?: string;
+          headline?: string;
+          highlight_id?: string;
+          id?: string;
+          page_id?: string;
+          section?: string;
+          user_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "stories_highlight_id_user_id_fkey";
+            columns: ["highlight_id", "user_id"];
+            isOneToOne: false;
+            referencedRelation: "highlights";
+            referencedColumns: ["id", "user_id"];
+          },
+          {
+            foreignKeyName: "stories_page_id_user_id_fkey";
+            columns: ["page_id", "user_id"];
+            isOneToOne: false;
+            referencedRelation: "pages";
+            referencedColumns: ["id", "user_id"];
+          },
+        ];
+      };
     };
     Views: {
       [_ in never]: never;
@@ -513,11 +737,35 @@ export type Database = {
         }[];
       };
       rate_limit_prune: { Args: { p_older_than_seconds?: number }; Returns: number };
+      save_edition: {
+        Args: { p_days: number; p_edition: string; p_saved: boolean };
+        Returns: {
+          created_at: string;
+          expires_at: string | null;
+          id: string;
+          issue_number: number;
+          paper_id: string;
+          published_at: string | null;
+          saved_at: string | null;
+          status: Database["public"]["Enums"]["edition_status"];
+          updated_at: string;
+          week_end: string | null;
+          week_start: string;
+        };
+        SetofOptions: {
+          from: "*";
+          to: "editions";
+          isOneToOne: true;
+          isSetofReturn: false;
+        };
+      };
     };
     Enums: {
       edition_status: "draft" | "published";
       generation_status: "pending" | "generating" | "ready" | "failed";
       member_role: "owner" | "member";
+      page_status: "writing" | "generated" | "approved";
+      reaction_kind: "ha" | "aww" | "hooray";
     };
     CompositeTypes: {
       [_ in never]: never;
@@ -634,6 +882,8 @@ export const Constants = {
       edition_status: ["draft", "published"],
       generation_status: ["pending", "generating", "ready", "failed"],
       member_role: ["owner", "member"],
+      page_status: ["writing", "generated", "approved"],
+      reaction_kind: ["ha", "aww", "hooray"],
     },
   },
 } as const;

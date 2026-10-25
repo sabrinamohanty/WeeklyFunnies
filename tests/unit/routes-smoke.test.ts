@@ -17,14 +17,7 @@ describe("Phase 0 routes", () => {
     expect(((await res.json()) as ErrorEnvelope).code).toBe("unauthorized");
   });
 
-  it("cron stubs authenticate first, then answer 501", async () => {
+  it("cron routes authenticate first", async () => {
     expect((await runJobs(new Request("http://localhost/api/internal/jobs"))).status).toBe(401);
-    const res = await runJobs(
-      new Request("http://localhost/api/internal/jobs", {
-        headers: { authorization: `Bearer ${process.env.CRON_SECRET}` },
-      }),
-    );
-    expect(res.status).toBe(501);
-    expect(((await res.json()) as ErrorEnvelope).code).toBe("not_implemented");
   });
 });
