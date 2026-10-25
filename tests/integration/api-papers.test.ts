@@ -9,7 +9,8 @@ import { GET as getMe } from "@/app/api/me/route";
 import { resetConfigCache } from "@/lib/config/env";
 import { createPaperRequestSchema } from "@/lib/contract/papers";
 import { routes } from "@/lib/contract/routes";
-import { generateInviteCode, formatInviteCode } from "@/lib/papers/invite-code";
+import { generateInviteCode } from "@/lib/papers/invite-code";
+import { activeInviteHashExists } from "@/lib/papers/repo";
 import { PostgresRateLimiter } from "@/lib/ratelimit/postgres";
 import { serviceDb } from "@/lib/db/client";
 import { textCases } from "../fixtures/text-cases";
@@ -159,44 +160,23 @@ describe("papers", () => {
     expect((await expectOk(asAma, routes.updatePaper)).paper.name).toBe("Renamed");
   });
 
-  it("sets the art style at creation, and only the owner can change it", async () => {
+  it("has no paper-level style: style belongs to each person", async () => {
+    const id = await newPaper(ama);
     const res = await call(createPaper, {
       method: "POST",
       path: "/api/papers",
       token: ama.token,
       body: { name: "Manga Monthly", style: "manga" },
     });
-    const { paper } = await expectOk(res, routes.createPaper);
-    papers.push(paper.id);
-    expect(paper.style).toBe("manga");
-    expect(
-      (
-        await expectOk(
-          await call(listPapers, { method: "GET", path: "/api/papers", token: ama.token }),
-          routes.listPapers,
-        )
-      ).papers.find((p) => p.id === paper.id)?.style,
-    ).toBe("manga");
-    expect(createPaperRequestSchema.parse({ name: "x" }).style).toBe("classic");
-
-    const invite = await newInvite(ama, paper.id);
-    await expectOk(await join(cole, invite.code), routes.joinPaper);
-    const patch = (u: TestUser, body: unknown) =>
-      call(patchPaper, {
-        method: "PATCH",
-        path: `/api/papers/${paper.id}`,
-        token: u.token,
-        params: { paperId: paper.id },
-        body,
-      });
-
-    await expectError(await patch(cole, { style: "sketch" }), 403, "forbidden");
-    await expectError(await patch(ama, { style: "watercolor" }), 400, "bad_request");
-    await expectError(await patch(ama, {}), 400, "bad_request");
-    const updated = await expectOk(await patch(ama, { style: "sketch" }), routes.updatePaper);
-    expect(updated.paper).toMatchObject({ name: "Manga Monthly", style: "sketch" });
-    const { data } = await serviceClient().from("papers").select("style").eq("id", paper.id).single();
-    expect(data?.style).toBe("sketch");
+    await expectError(res, 400, "bad_request");
+    const patched = await call(patchPaper, {
+      method: "PATCH",
+      path: `/api/papers/${id}`,
+      token: ama.token,
+      params: { paperId: id },
+      body: { style: "sketch" },
+    });
+    await expectError(patched, 400, "bad_request");
   });
 
   it("handles every shared text case for the paper name", async () => {
@@ -224,10 +204,10 @@ describe("papers", () => {
 });
 
 describe("invites", () => {
-  it("return the code once, formatted, and list without it", async () => {
+  it("return the 6-character code once, and list without it", async () => {
     const id = await newPaper(ama);
     const invite = await newInvite(ama, id);
-    expect(invite.code).toMatch(/^[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$/);
+    expect(invite.code).toMatch(/^[0-9A-HJKMNP-TV-Z]{6}$/);
     expect(invite.active).toBe(true);
 
     const res = await call(listInvites, {
@@ -300,7 +280,7 @@ describe("joining by code", () => {
     const id = await newPaper(ama);
     const invite = await newInvite(ama, id);
     const { paper } = await expectOk(
-      await join(ben, invite.code.toLowerCase().replace(/-/g, " ")),
+      await join(ben, ` ${invite.code.slice(0, 3)} ${invite.code.slice(3).toLowerCase()} `),
       routes.joinPaper,
     );
     expect(paper).toMatchObject({ id, role: "member", memberCount: 2 });
@@ -341,7 +321,7 @@ describe("joining by code", () => {
       .eq("id", expired.id);
 
     const bodies = [];
-    for (const code of [formatInviteCode(generateInviteCode()), revoked.code, expired.code]) {
+    for (const code of [generateInviteCode(), revoked.code, expired.code]) {
       const err = await expectError(await join(cole, code), 404, "not_found");
       bodies.push({ ...err, requestId: "" });
     }
@@ -362,13 +342,59 @@ describe("joining by code", () => {
     resetConfigCache();
     try {
       const statuses: number[] = [];
-      for (let i = 0; i < 7; i++)
-        statuses.push((await join(guesser, formatInviteCode(generateInviteCode()))).status);
+      for (let i = 0; i < 7; i++) statuses.push((await join(guesser, generateInviteCode())).status);
       expect(statuses).toEqual([404, 404, 404, 404, 404, 429, 429]);
     } finally {
       process.env.RATE_LIMIT_ROUTE_SCALE = "100";
       resetConfigCache();
     }
+  });
+
+  it("also limits guessing per IP across accounts (20 per minute)", async () => {
+    const guessers = await Promise.all(Array.from({ length: 5 }, (_, i) => createUser(`ip-guesser-${i}`)));
+    users.push(...guessers);
+    process.env.RATE_LIMIT_ROUTE_SCALE = "1";
+    resetConfigCache();
+    const ip = `198.51.100.${Math.floor(Math.random() * 200) + 1}`;
+    try {
+      const statuses: number[] = [];
+      for (const g of guessers.slice(0, 4))
+        for (let i = 0; i < 5; i++) statuses.push((await join(g, generateInviteCode(), ip)).status);
+      expect(statuses.every((s) => s === 404)).toBe(true);
+      await expectError(await join(guessers[4]!, generateInviteCode(), ip), 429, "rate_limited");
+    } finally {
+      process.env.RATE_LIMIT_ROUTE_SCALE = "100";
+      resetConfigCache();
+    }
+  });
+
+  it("only treat a code as taken while an invite with it is still usable", async () => {
+    const id = await newPaper(ama);
+    const hash = (n: string) => n.repeat(64);
+    const db = serviceClient();
+    const day = 86_400_000;
+    const row = (code: string, expiresIn: number, revoked: boolean) => ({
+      paper_id: id,
+      code_hash: hash(code),
+      created_by: ama.id,
+      created_at: new Date(Date.now() - day).toISOString(),
+      expires_at: new Date(Date.now() + expiresIn).toISOString(),
+      revoked_at: revoked ? new Date().toISOString() : null,
+    });
+    const seeded = await db
+      .from("invites")
+      .insert([row("a", -1000, false), row("b", day, true), row("c", day, false)]);
+    expect(seeded.error).toBeNull();
+    expect(await activeInviteHashExists(hash("a"))).toBe(false);
+    expect(await activeInviteHashExists(hash("b"))).toBe(false);
+    expect(await activeInviteHashExists(hash("c"))).toBe(true);
+    const dup = await db.from("invites").insert({
+      paper_id: id,
+      code_hash: hash("a"),
+      created_by: ama.id,
+      expires_at: new Date(Date.now() + 86_400_000).toISOString(),
+    });
+    expect(dup.error).toBeNull();
   });
 
   it("refuses to join a full paper", async () => {

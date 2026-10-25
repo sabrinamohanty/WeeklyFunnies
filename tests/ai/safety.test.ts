@@ -8,12 +8,13 @@ import { findUngrounded } from "@/lib/safety/grounding";
 import { styleConfig } from "@/lib/ai/styles";
 import { STYLE_KEYS } from "@/lib/contract/common";
 import { buildLook } from "@/lib/safety/look";
-import { checkStoryOutput } from "@/lib/safety/output";
+import { checkPageOutput, checkStoryOutput } from "@/lib/safety/output";
 import {
   buildAvatarImagePrompt,
+  buildPageUserPrompt,
   buildPanelImagePrompt,
-  buildStoryUserPrompt,
   HOROSCOPE_SYSTEM_PROMPT,
+  PAGE_SYSTEM_PROMPT,
   STORY_SYSTEM_PROMPT,
 } from "@/lib/safety/prompts";
 import { containsLink, containsMarkup, redactPersonalData, toPromptSafe } from "@/lib/safety/redact";
@@ -81,19 +82,23 @@ describe("delimiters", () => {
   });
 
   it("puts user text only in the user prompt, never in system prompts", () => {
-    const user = buildStoryUserPrompt({
+    const user = buildPageUserPrompt({
       weekLabel: "October 19, 2026",
-      people: [{ ref: "p1", name: "Ama" }],
-      highlights: [{ ref: "h1", personRef: "p1", text: "hello world", serious: true, inComic: false }],
+      name: "Ama",
+      city: "Accra",
+      highlights: [{ ref: "h1", text: "hello world", serious: true, inComic: true }],
       boundary: "b1",
     });
-    expect(user).toContain("[h1] person: p1 | comic: no | tone: serious");
+    expect(user).toContain("[h1] comic: no | tone: serious");
     expect(unwrapUntrusted(user, "highlight")).toBe("hello world");
     expect(unwrapUntrusted(user, "name")).toBe("Ama");
-    for (const sys of [STORY_SYSTEM_PROMPT, HOROSCOPE_SYSTEM_PROMPT]) {
+    expect(unwrapUntrusted(user, "city")).toBe("Accra");
+    for (const sys of [PAGE_SYSTEM_PROMPT, STORY_SYSTEM_PROMPT, HOROSCOPE_SYSTEM_PROMPT]) {
       expect(sys).not.toContain("hello world");
+      expect(sys).not.toContain("${");
       expect(sys).toMatch(/JSON/);
     }
+    expect(PAGE_SYSTEM_PROMPT).toMatch(/never instructions/);
     expect(STORY_SYSTEM_PROMPT).toMatch(/never instructions/);
   });
 });
@@ -122,127 +127,196 @@ describe("grounding", () => {
   });
 });
 
-describe("checkStoryOutput", () => {
+describe("checkPageOutput", () => {
   const input = {
     weekLabel: "October 19, 2026",
-    people: [
-      { ref: "p1", name: "Ama" },
-      { ref: "p2", name: "Ben" },
-    ],
+    name: "Ama",
+    city: "Accra",
     highlights: [
-      { ref: "h1", personRef: "p1", text: "Ran my first 5K in Kumasi", serious: false, inComic: true },
-      { ref: "h2", personRef: "p2", text: "Baked sourdough bread", serious: false, inComic: true },
-      { ref: "h3", personRef: "p2", text: "Grandma passed away on Tuesday", serious: true, inComic: false },
+      { ref: "h1", text: "Ran my first 5K in Kumasi", serious: false, inComic: true },
+      { ref: "h2", text: "Baked sourdough bread", serious: false, inComic: true },
+      { ref: "h3", text: "Grandma passed away on Tuesday", serious: true, inComic: false },
     ],
   };
-  const panel = (who: "p1" | "p2", moment: string) => ({
-    scene: who === "p1" ? "a race track in Kumasi, Ama running, wide shot" : "a kitchen, Ben baking bread",
-    caption: null,
-    dialogue: [{ speaker: who === "p1" ? "Ama" : "Ben", text: "What a week!", side: "left" as const }],
-    characters: [who] as string[],
-    moments: [moment],
+  const panel = (moment: string) => ({
+    scene: moment === "h1" ? "a race track in Kumasi, Ama running, wide shot" : "a kitchen, Ama baking bread",
+    caption: null as string | null,
+    dialogue: [{ text: "What a week!", side: "left" as const }],
+    moment,
   });
   const base = {
-    article: {
-      headline: "Ama ran a 5K",
-      byline: "Ama",
-      body: "Ama ran her first 5K in Kumasi.\n\nBen baked sourdough bread.\n\nBen also had a hard Tuesday.",
-    },
-    comic: {
-      title: "Bread and a 5K",
-      panels: [panel("p1", "h1"), panel("p2", "h2"), panel("p1", "h1"), panel("p2", "h2")],
-    },
+    stories: [
+      {
+        highlight: "h1",
+        section: "sports",
+        headline: "Accra runner conquers Kumasi 5K",
+        body: "Ama ran her first 5K in Kumasi.",
+      },
+      {
+        highlight: "h2",
+        section: "food",
+        headline: "Ama bakes bread, kitchen survives",
+        body: "Ama baked sourdough bread.",
+      },
+      {
+        highlight: "h3",
+        section: "family",
+        headline: "Ama remembers her grandma",
+        body: "Ama's grandma passed away on Tuesday.",
+      },
+    ],
+    comic: { title: "Bread and a 5K", panels: [panel("h1"), panel("h2"), panel("h1"), panel("h2")] },
   };
-  type Story = typeof base;
-  const edit = (f: (s: Story) => void) => {
-    const copy = structuredClone(base) as Story;
+  type Page = typeof base;
+  const edit = (f: (p: Page) => void) => {
+    const copy = structuredClone(base) as Page;
     f(copy);
     return copy;
   };
 
   it("accepts valid output, keeping refs for the service to resolve", () => {
-    const r = checkStoryOutput(base, input);
+    const r = checkPageOutput(base, input);
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(r.value.article.bylineRef).toBe("p1");
-    expect(r.value.comic!.panels[1]).toMatchObject({ characterRefs: ["p2"], momentRefs: ["h2"] });
-    expect(r.value.comic!.panels[0]!.dialogue[0]!.speakerRef).toBe("p1");
-  });
-
-  it("accepts the article mentioning a serious highlight", () => {
-    expect(
-      checkStoryOutput(
-        edit((s) => (s.article.body += " Grandma passed away.")),
-        input,
-      ).ok,
-    ).toBe(true);
+    expect(r.value.stories.map((st) => st.highlightRef)).toEqual(["h1", "h2", "h3"]);
+    expect(r.value.stories[0]!.section).toBe("sports");
+    expect(r.value.comic!.panels.map((p) => p.momentRef)).toEqual(["h1", "h2", "h1", "h2"]);
   });
 
   it.each([
     ["missing", undefined, "not_json"],
     ["not json", "{not json", "not_json"],
-    ["extra field", edit((s) => Object.assign(s, { extra: 1 })), "schema"],
-    ["three panels", edit((s) => s.comic.panels.pop()), "schema"],
+    ["extra field", edit((p) => Object.assign(p, { extra: 1 })), "schema"],
+    ["unknown section", edit((p) => (p.stories[0]!.section = "gossip")), "schema"],
+    ["three panels", edit((p) => p.comic.panels.pop()), "schema"],
     [
       "three dialogue lines",
-      edit((s) => (s.comic.panels[0]!.dialogue = Array(3).fill(s.comic.panels[0]!.dialogue[0]))),
+      edit((p) => (p.comic.panels[0]!.dialogue = Array(3).fill(p.comic.panels[0]!.dialogue[0]))),
       "schema",
     ],
-    ["blank headline", edit((s) => (s.article.headline = " ")), "empty"],
-    ["long headline", edit((s) => (s.article.headline = "a".repeat(121))), "too_long"],
-    ["link", edit((s) => (s.article.body += " See evil.example.com")), "link"],
-    ["markup", edit((s) => (s.comic.title = "<i>wow</i>")), "markup"],
-    ["unknown byline", edit((s) => (s.article.byline = "Drake")), "byline"],
-    ["two paragraphs", edit((s) => (s.article.body = "Ama ran.\n\nBen baked.")), "paragraphs"],
-    ["invented name", edit((s) => (s.article.body += " Drake cheered.")), "ungrounded"],
-    ["invented number", edit((s) => (s.article.headline = "Ama ran a 10K")), "ungrounded"],
+    ["a story missing", edit((p) => p.stories.pop()), "references"],
+    ["stories out of order", edit((p) => p.stories.reverse()), "references"],
+    ["unknown story ref", edit((p) => (p.stories[0]!.highlight = "h9")), "references"],
+    ["blank headline", edit((p) => (p.stories[0]!.headline = " ")), "empty"],
+    ["long headline", edit((p) => (p.stories[0]!.headline = "a".repeat(121))), "too_long"],
+    ["long body", edit((p) => (p.stories[0]!.body = "a ".repeat(301))), "too_long"],
+    ["link", edit((p) => (p.stories[1]!.body += " See evil.example.com")), "link"],
+    ["markup", edit((p) => (p.comic.title = "<i>wow</i>")), "markup"],
+    ["invented name", edit((p) => (p.stories[0]!.body += " Drake cheered.")), "ungrounded"],
+    ["invented number", edit((p) => (p.stories[0]!.headline = "Ama ran a 10K")), "ungrounded"],
+    ["jokey serious story", edit((p) => (p.stories[2]!.headline = "Ama remembers her grandma!")), "tone"],
     [
       "serious text in comic",
-      edit((s) => (s.comic.panels[1]!.scene = "a quiet room on Tuesday")),
+      edit((p) => (p.comic.panels[1]!.scene = "a quiet room on Tuesday")),
       "ungrounded",
     ],
-    ["no comic despite eligible", edit((s) => Object.assign(s, { comic: null })), "references"],
-    ["unknown person", edit((s) => (s.comic.panels[0]!.characters = ["p9"])), "references"],
-    ["unknown moment", edit((s) => (s.comic.panels[0]!.moments = ["h9"])), "references"],
-    ["serious moment", edit((s) => (s.comic.panels[1]!.moments = ["h3"])), "references"],
-    ["moment author not drawn", edit((s) => (s.comic.panels[0]!.moments = ["h2"])), "references"],
-    ["speaker not in panel", edit((s) => (s.comic.panels[0]!.dialogue[0]!.speaker = "Ben")), "references"],
-    ["duplicate characters", edit((s) => (s.comic.panels[0]!.characters = ["p1", "p1"])), "references"],
+    ["no comic despite eligible", edit((p) => Object.assign(p, { comic: null })), "references"],
+    ["unknown moment", edit((p) => (p.comic.panels[0]!.moment = "h9")), "references"],
+    ["serious moment", edit((p) => (p.comic.panels[1]!.moment = "h3")), "references"],
     [
       "text in scene",
-      edit((s) => (s.comic.panels[0]!.scene = 'a race track, sign reads "Kumasi"')),
+      edit((p) => (p.comic.panels[0]!.scene = 'a race track, sign reads "Kumasi"')),
       "scene_text",
     ],
     [
       "long dialogue",
-      edit((s) => (s.comic.panels[0]!.dialogue[0]!.text = "so ".repeat(13).trim())),
+      edit((p) => (p.comic.panels[0]!.dialogue[0]!.text = "so ".repeat(13).trim())),
       "too_many_words",
     ],
+    ["long caption", edit((p) => (p.comic.panels[0]!.caption = "so ".repeat(16).trim())), "too_many_words"],
   ] as Array<[string, unknown, string]>)("rejects %s", (_name, raw, reason) => {
-    expect(checkStoryOutput(raw, input)).toEqual({ ok: false, reason });
+    expect(checkPageOutput(raw, input)).toEqual({ ok: false, reason });
+  });
+
+  it("rejects Title Case headlines, which read as invented names", () => {
+    expect(
+      checkPageOutput(
+        edit((p) => (p.stories[1]!.headline = "Ama Bakes Bread")),
+        input,
+      ),
+    ).toEqual({
+      ok: false,
+      reason: "ungrounded",
+    });
+  });
+
+  it("allows the city and the person's name in stories", () => {
+    expect(
+      checkPageOutput(
+        edit((p) => (p.stories[1]!.headline = "Accra baker Ama rises")),
+        input,
+      ).ok,
+    ).toBe(true);
   });
 
   it("requires no comic when every highlight is serious or opted out", () => {
     const quiet = {
       ...input,
-      highlights: [input.highlights[2]!, { ...input.highlights[0]!, inComic: false }],
+      highlights: [
+        { ...input.highlights[2]!, ref: "h1" },
+        { ...input.highlights[0]!, ref: "h2", inComic: false },
+      ],
     };
-    expect(checkStoryOutput(base, quiet)).toEqual({ ok: false, reason: "references" });
-    expect(checkStoryOutput({ ...base, comic: null }, quiet).ok).toBe(true);
+    const stories = [
+      { ...base.stories[2]!, highlight: "h1" },
+      { ...base.stories[0]!, highlight: "h2" },
+    ];
+    expect(checkPageOutput({ stories, comic: base.comic }, quiet)).toEqual({
+      ok: false,
+      reason: "references",
+    });
+    expect(checkPageOutput({ stories, comic: null }, quiet).ok).toBe(true);
   });
 
   it("checks only names and numbers in dialogue", () => {
     expect(
-      checkStoryOutput(
-        edit((s) => (s.comic.panels[0]!.dialogue[0]!.text = "Wow, I did it!")),
+      checkPageOutput(
+        edit((p) => (p.comic.panels[0]!.dialogue[0]!.text = "Wow, I did it!")),
         input,
       ).ok,
     ).toBe(true);
+    expect(
+      checkPageOutput(
+        edit((p) => (p.comic.panels[0]!.dialogue[0]!.text = "Hi Drake!")),
+        input,
+      ),
+    ).toEqual({
+      ok: false,
+      reason: "ungrounded",
+    });
+  });
+});
+
+describe("checkStoryOutput", () => {
+  const input = {
+    weekLabel: "October 19, 2026",
+    name: "Ama",
+    city: null,
+    highlights: [{ ref: "h1", text: "Ran my first 5K in Kumasi", serious: false, inComic: true }],
+  };
+
+  it("accepts one story for the highlight", () => {
     const r = checkStoryOutput(
-      edit((s) => (s.comic.panels[0]!.dialogue[0]!.text = "Hi Drake!")),
+      { section: "sports", headline: "Ama takes Kumasi by storm", body: "Ama ran a 5K." },
       input,
     );
-    expect(r).toEqual({ ok: false, reason: "ungrounded" });
+    expect(r).toEqual({
+      ok: true,
+      value: {
+        highlightRef: "h1",
+        section: "sports",
+        headline: "Ama takes Kumasi by storm",
+        body: "Ama ran a 5K.",
+      },
+    });
+  });
+
+  it.each([
+    ["extra field", { section: "news", headline: "Ama ran", body: "Ama ran.", highlight: "h1" }, "schema"],
+    ["invented place", { section: "news", headline: "Ama ran in Paris", body: "Ama ran." }, "ungrounded"],
+    ["markup", { section: "news", headline: "Ama ran", body: "<b>Ama</b> ran." }, "markup"],
+  ] as Array<[string, unknown, string]>)("rejects %s", (_n, raw, reason) => {
+    expect(checkStoryOutput(raw, input)).toEqual({ ok: false, reason });
   });
 });
 
@@ -263,8 +337,9 @@ describe("prompt templates", () => {
   });
 
   it("panel and avatar prompts forbid drawn text", () => {
-    const c = [{ name: "Ama", look: "bald" }];
-    expect(buildPanelImagePrompt("a park", c, styleConfig("sketch"))).toContain("Do not draw any text");
+    expect(buildPanelImagePrompt("a park", { name: "Ama", look: "bald" }, styleConfig("sketch"))).toContain(
+      "Do not draw any text",
+    );
     expect(buildAvatarImagePrompt("bald", styleConfig("sketch"))).toContain("Do not draw any text");
   });
 });
@@ -286,13 +361,14 @@ describe("generated image checks", () => {
 
 describe("stub provider", () => {
   const ctx = { requestId: "r", signal: new AbortController().signal, timeoutMs: 1_000 };
-  const req = { task: "story" as const, system: "s", jsonSchema: {}, maxOutputTokens: 100 };
+  const req = { task: "page" as const, system: "s", jsonSchema: {}, maxOutputTokens: 100 };
 
   it("is deterministic", async () => {
-    const user = buildStoryUserPrompt({
+    const user = buildPageUserPrompt({
       weekLabel: "October 19, 2026",
-      people: [{ ref: "p1", name: "Ama" }],
-      highlights: [{ ref: "h1", personRef: "p1", text: "Baked bread", serious: false, inComic: true }],
+      name: "Ama",
+      city: null,
+      highlights: [{ ref: "h1", text: "Baked bread", serious: false, inComic: true }],
       boundary: "b",
     });
     const a = await new StubProvider().completeJson({ ...req, user }, ctx);

@@ -1,26 +1,37 @@
 import type { z } from "zod";
 import { deletedSchema, emptyBody } from "./common";
 import {
-  createHighlightRequestSchema,
   editionBundleResponseSchema,
   editionIdParams,
   editionResponseSchema,
   editionsResponseSchema,
-  generateStoryRequestSchema,
+  editionStoryParams,
+  reactionResponseSchema,
+  saveEditionRequestSchema,
+  setReactionRequestSchema,
+} from "./editions";
+import {
+  createHighlightRequestSchema,
+  currentPageResponseSchema,
+  drawPanelRequestSchema,
+  generatePageRequestSchema,
   highlightIdParams,
   highlightResponseSchema,
-  generatePanelRequestSchema,
-  generatePanelResponseSchema,
+  pageIdParams,
+  pagePanelParams,
+  pageResponseSchema,
+  pageStoryParams,
+  panelResponseSchema,
   photoIdParams,
   photoResponseSchema,
   photoUploadSchema,
-  reorderRequestSchema,
-  reorderResponseSchema,
-  storyQuerySchema,
+  reorderHighlightsRequestSchema,
+  reorderPanelsRequestSchema,
+  setPagePapersRequestSchema,
   storyResponseSchema,
   updateHighlightRequestSchema,
-  updateStoryRequestSchema,
-} from "./editions";
+  updatePageRequestSchema,
+} from "./pages";
 import type { ErrorCode } from "./errors";
 import {
   createPaperRequestSchema,
@@ -47,6 +58,7 @@ import {
   updateProfileRequestSchema,
 } from "./profile";
 import { cronResultSchema, healthResponseSchema, logoutResponseSchema } from "./session";
+import { weatherQuerySchema, weatherResponseSchema } from "./weather";
 
 export type HttpMethod = "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
 export type AuthMode = "none" | "user" | "cron";
@@ -66,7 +78,8 @@ export interface RouteContract {
     | { kind: "multipart"; schema: z.ZodObject; maxBytes: number };
   success: { status: 200 | 201 | 202; schema: z.ZodType; description?: string };
   errors: ErrorCode[];
-  rateLimit?: { perUserPerMinute: number };
+  /** Per-route limits on top of the global per-IP and per-user limits. */
+  rateLimit?: { perUserPerMinute: number; perIpPerMinute?: number };
 }
 
 const AUTHED: ErrorCode[] = ["unauthorized", "rate_limited", "internal"];
@@ -120,12 +133,25 @@ export const routes = {
     errors: ["bad_request", "provider_unavailable", ...AUTHED],
     rateLimit: { perUserPerMinute: 20 },
   }),
+  getWeather: route({
+    method: "GET",
+    path: "/api/weather",
+    summary:
+      "7-day forecast for the browser's location if given (rounded, never stored), else the profile city.",
+    tag: "profile",
+    auth: "user",
+    phase: 5,
+    query: weatherQuerySchema,
+    success: { status: 200, schema: weatherResponseSchema },
+    errors: ["bad_request", "provider_unavailable", ...AUTHED],
+    rateLimit: { perUserPerMinute: 20 },
+  }),
 
   // ---------- Avatar ----------
   getAvatar: route({
     method: "GET",
     path: "/api/avatar",
-    summary: "Get the caller's look, trait form, and avatars (one per style).",
+    summary: "Get the caller's style, look, trait form, and avatar.",
     tag: "avatar",
     auth: "user",
     phase: 4,
@@ -136,8 +162,8 @@ export const routes = {
     method: "POST",
     path: "/api/avatar",
     summary:
-      "Generate and save the caller's avatar in a style, from their stored look (or new traits) and " +
-      "optionally their photo. Waits for the image. Calling it again regenerates (capped).",
+      "Draw the caller's avatar in their style (optionally switching style first), from their stored " +
+      "look or new traits, and optionally their photo. Waits for the image. Calling again redraws (capped).",
     tag: "avatar",
     auth: "user",
     phase: 4,
@@ -206,7 +232,7 @@ export const routes = {
   updatePaper: route({
     method: "PATCH",
     path: "/api/papers/{paperId}",
-    summary: "Rename a paper or change its art style. Owner only.",
+    summary: "Rename a paper. Owner only.",
     tag: "papers",
     auth: "user",
     phase: 2,
@@ -262,14 +288,14 @@ export const routes = {
     body: { kind: "json", schema: joinRequestSchema },
     success: { status: 200, schema: paperResponseSchema },
     errors: ["bad_request", "not_found", "conflict", ...AUTHED],
-    rateLimit: { perUserPerMinute: 5 },
+    rateLimit: { perUserPerMinute: 5, perIpPerMinute: 20 },
   }),
 
   // ---------- Editions ----------
   listEditions: route({
     method: "GET",
     path: "/api/papers/{paperId}/editions",
-    summary: "List a paper's published editions and current draft, newest first.",
+    summary: "List a paper's current draft and published editions (back issues), newest first.",
     tag: "editions",
     auth: "user",
     phase: 4,
@@ -291,7 +317,9 @@ export const routes = {
   getEditionBundle: route({
     method: "GET",
     path: "/api/editions/{editionId}",
-    summary: "Everything the app needs to render an edition, with short-lived signed image URLs.",
+    summary:
+      "Everything needed to render an edition: members, progress, published pages with reactions, " +
+      "horoscopes, and birthdays. Signed image URLs are short-lived.",
     tag: "editions",
     auth: "user",
     phase: 4,
@@ -303,57 +331,128 @@ export const routes = {
     method: "POST",
     path: "/api/editions/{editionId}/publish",
     summary:
-      "Publish the edition with its story. Owner only. Requires a story that isn't stale and no panel " +
-      "still generating; failed panels publish as placeholders. Blocks further edits.",
+      "Publish the edition with every approved page. Owner only, after the deadline. Panels still " +
+      "generating block publishing; failed panels publish as placeholders.",
     tag: "editions",
     auth: "user",
     phase: 4,
     params: editionIdParams,
     body: { kind: "json", schema: emptyBody },
     success: { status: 200, schema: editionResponseSchema },
-    errors: ["bad_request", "forbidden", "not_found", "conflict", "edition_locked", ...AUTHED],
+    errors: ["bad_request", "forbidden", "not_found", "conflict", ...AUTHED],
   }),
-  reorderHighlights: route({
+  saveEdition: route({
     method: "PUT",
-    path: "/api/editions/{editionId}/order",
-    summary: "Reorder the caller's own highlights in a draft edition.",
-    tag: "highlights",
+    path: "/api/editions/{editionId}/saved",
+    summary: "Keep a published edition forever, or undo that. Owner only. Applies to every member.",
+    tag: "editions",
     auth: "user",
     phase: 4,
     params: editionIdParams,
-    body: { kind: "json", schema: reorderRequestSchema },
-    success: { status: 200, schema: reorderResponseSchema },
-    errors: ["bad_request", "not_found", "edition_locked", ...AUTHED],
+    body: { kind: "json", schema: saveEditionRequestSchema },
+    success: { status: 200, schema: editionResponseSchema },
+    errors: ["bad_request", "forbidden", "not_found", "conflict", ...AUTHED],
+  }),
+  setReaction: route({
+    method: "PUT",
+    path: "/api/editions/{editionId}/stories/{storyId}/reaction",
+    summary: "React to a story in a published edition (one reaction per member), or remove it.",
+    tag: "editions",
+    auth: "user",
+    phase: 4,
+    params: editionStoryParams,
+    body: { kind: "json", schema: setReactionRequestSchema },
+    success: { status: 200, schema: reactionResponseSchema },
+    errors: ["bad_request", "not_found", "conflict", ...AUTHED],
+    rateLimit: { perUserPerMinute: 60 },
   }),
 
-  // ---------- Story and comic ----------
-  getStory: route({
+  // ---------- Pages: your highlights, stories, and comic for the week ----------
+  getCurrentPage: route({
     method: "GET",
-    path: "/api/story",
-    summary:
-      "Get the edition's article and comic with panel image statuses. Owner only in drafts; every " +
-      "member once published.",
-    tag: "story",
+    path: "/api/pages/current",
+    summary: "Get your page for this week, or null if you haven't picked papers yet.",
+    tag: "pages",
     auth: "user",
     phase: 4,
-    query: storyQuerySchema,
-    success: { status: 200, schema: storyResponseSchema },
-    errors: ["bad_request", "forbidden", "not_found", ...AUTHED],
+    success: { status: 200, schema: currentPageResponseSchema },
+    errors: AUTHED,
   }),
-  generateStory: route({
-    method: "POST",
-    path: "/api/story",
+  setCurrentPagePapers: route({
+    method: "PUT",
+    path: "/api/pages/current",
     summary:
-      "Write the article and 4-panel comic script from the edition's approved highlights. Owner only. " +
-      "Returns the stored story unless regenerate is true. Panel images start as pending.",
-    tag: "story",
+      "Pick the papers this week's page goes to, creating the page if needed. Each paper's current " +
+      "edition must still be open.",
+    tag: "pages",
     auth: "user",
     phase: 4,
-    body: { kind: "json", schema: generateStoryRequestSchema, maxBytes: 64 * 1024 },
-    success: { status: 200, schema: storyResponseSchema },
+    body: { kind: "json", schema: setPagePapersRequestSchema },
+    success: { status: 200, schema: pageResponseSchema },
+    errors: ["bad_request", "not_found", "edition_locked", ...AUTHED],
+  }),
+  getPage: route({
+    method: "GET",
+    path: "/api/pages/{pageId}",
+    summary: "Get one of your pages.",
+    tag: "pages",
+    auth: "user",
+    phase: 4,
+    params: pageIdParams,
+    success: { status: 200, schema: pageResponseSchema },
+    errors: ["bad_request", "not_found", ...AUTHED],
+  }),
+  updatePage: route({
+    method: "PATCH",
+    path: "/api/pages/{pageId}",
+    summary: "Edit headlines, story text, the comic title, captions, or dialogue. Edits are moderated.",
+    tag: "pages",
+    auth: "user",
+    phase: 4,
+    params: pageIdParams,
+    body: { kind: "json", schema: updatePageRequestSchema, maxBytes: 16 * 1024 },
+    success: { status: 200, schema: pageResponseSchema },
+    errors: ["bad_request", "not_found", "conflict", "edition_locked", "content_blocked", ...AUTHED],
+  }),
+  addHighlight: route({
+    method: "POST",
+    path: "/api/pages/{pageId}/highlights",
+    summary: "Add a highlight (up to 3). Moderated; nothing is generated yet.",
+    tag: "pages",
+    auth: "user",
+    phase: 4,
+    params: pageIdParams,
+    body: { kind: "json", schema: createHighlightRequestSchema, maxBytes: 16 * 1024 },
+    success: { status: 201, schema: highlightResponseSchema },
+    errors: ["bad_request", "not_found", "conflict", "edition_locked", "content_blocked", ...AUTHED],
+    rateLimit: { perUserPerMinute: 10 },
+  }),
+  reorderHighlights: route({
+    method: "PUT",
+    path: "/api/pages/{pageId}/highlights/order",
+    summary: "Reorder your highlights. Stories follow the same order.",
+    tag: "pages",
+    auth: "user",
+    phase: 4,
+    params: pageIdParams,
+    body: { kind: "json", schema: reorderHighlightsRequestSchema },
+    success: { status: 200, schema: pageResponseSchema },
+    errors: ["bad_request", "not_found", "edition_locked", ...AUTHED],
+  }),
+  generatePage: route({
+    method: "POST",
+    path: "/api/pages/{pageId}/generate",
+    summary:
+      "Write a story for each highlight and a 4-panel comic script, in your style. Returns the stored " +
+      "page unless regenerate is true. Panel images start as pending; draw them with the panel route.",
+    tag: "pages",
+    auth: "user",
+    phase: 4,
+    params: pageIdParams,
+    body: { kind: "json", schema: generatePageRequestSchema },
+    success: { status: 200, schema: pageResponseSchema },
     errors: [
       "bad_request",
-      "forbidden",
       "not_found",
       "conflict",
       "edition_locked",
@@ -363,31 +462,41 @@ export const routes = {
     ],
     rateLimit: { perUserPerMinute: 5 },
   }),
-  updateStory: route({
-    method: "PATCH",
-    path: "/api/story",
-    summary: "Edit the headline, body, title, captions, or dialogue. Owner only. Edits are moderated.",
-    tag: "story",
-    auth: "user",
-    phase: 4,
-    body: { kind: "json", schema: updateStoryRequestSchema, maxBytes: 16 * 1024 },
-    success: { status: 200, schema: storyResponseSchema },
-    errors: ["bad_request", "forbidden", "not_found", "edition_locked", "content_blocked", ...AUTHED],
-  }),
-  generatePanel: route({
+  rewriteStory: route({
     method: "POST",
-    path: "/api/panel",
-    summary:
-      "Draw one panel of the stored story and wait for the image. Fire all four in parallel. Returns the " +
-      "stored image unless regenerate is true. Owner only.",
-    tag: "story",
+    path: "/api/pages/{pageId}/stories/{storyId}/rewrite",
+    summary: "Write a new headline and story for one highlight. Limited per page.",
+    tag: "pages",
     auth: "user",
     phase: 4,
-    body: { kind: "json", schema: generatePanelRequestSchema, maxBytes: 16 * 1024 },
-    success: { status: 200, schema: generatePanelResponseSchema },
+    params: pageStoryParams,
+    body: { kind: "json", schema: emptyBody },
+    success: { status: 200, schema: storyResponseSchema },
     errors: [
       "bad_request",
-      "forbidden",
+      "not_found",
+      "conflict",
+      "edition_locked",
+      "quota_exceeded",
+      "provider_unavailable",
+      ...AUTHED,
+    ],
+    rateLimit: { perUserPerMinute: 10 },
+  }),
+  drawPanel: route({
+    method: "POST",
+    path: "/api/pages/{pageId}/panels/{index}",
+    summary:
+      "Draw one panel and wait for the image. Fire all four in parallel after generating. Returns the " +
+      "stored image unless regenerate is true.",
+    tag: "pages",
+    auth: "user",
+    phase: 4,
+    params: pagePanelParams,
+    body: { kind: "json", schema: drawPanelRequestSchema },
+    success: { status: 200, schema: panelResponseSchema },
+    errors: [
+      "bad_request",
       "not_found",
       "conflict",
       "edition_locked",
@@ -398,25 +507,39 @@ export const routes = {
     ],
     rateLimit: { perUserPerMinute: 20 },
   }),
-
-  // ---------- Highlights ----------
-  createHighlight: route({
-    method: "POST",
-    path: "/api/highlights",
-    summary: "Add a highlight (up to 3 per person per edition). Moderated; nothing is generated yet.",
-    tag: "highlights",
+  reorderPanels: route({
+    method: "PUT",
+    path: "/api/pages/{pageId}/panels/order",
+    summary: "Reorder the comic's panels.",
+    tag: "pages",
     auth: "user",
     phase: 4,
-    body: { kind: "json", schema: createHighlightRequestSchema, maxBytes: 16 * 1024 },
-    success: { status: 201, schema: highlightResponseSchema },
-    errors: ["bad_request", "not_found", "conflict", "edition_locked", "content_blocked", ...AUTHED],
-    rateLimit: { perUserPerMinute: 10 },
+    params: pageIdParams,
+    body: { kind: "json", schema: reorderPanelsRequestSchema },
+    success: { status: 200, schema: pageResponseSchema },
+    errors: ["bad_request", "not_found", "conflict", "edition_locked", ...AUTHED],
   }),
+  approvePage: route({
+    method: "POST",
+    path: "/api/pages/{pageId}/approve",
+    summary:
+      "Approve your page for every linked paper. Needs generated, non-stale content and no panel still " +
+      "generating. Any later edit clears approval.",
+    tag: "pages",
+    auth: "user",
+    phase: 4,
+    params: pageIdParams,
+    body: { kind: "json", schema: emptyBody },
+    success: { status: 200, schema: pageResponseSchema },
+    errors: ["bad_request", "not_found", "conflict", "edition_locked", ...AUTHED],
+  }),
+
+  // ---------- Highlights and photos ----------
   getHighlight: route({
     method: "GET",
     path: "/api/highlights/{highlightId}",
-    summary: "Get one of the caller's highlights.",
-    tag: "highlights",
+    summary: "Get one of your highlights.",
+    tag: "pages",
     auth: "user",
     phase: 4,
     params: highlightIdParams,
@@ -426,8 +549,8 @@ export const routes = {
   updateHighlight: route({
     method: "PATCH",
     path: "/api/highlights/{highlightId}",
-    summary: "Edit text, toggle serious or inComic, or approve. Edited text is moderated.",
-    tag: "highlights",
+    summary: "Edit text or toggle serious or inComic. Edited text is moderated. Marks the page stale.",
+    tag: "pages",
     auth: "user",
     phase: 4,
     params: highlightIdParams,
@@ -438,20 +561,18 @@ export const routes = {
   deleteHighlight: route({
     method: "DELETE",
     path: "/api/highlights/{highlightId}",
-    summary: "Delete one of the caller's highlights and its photos. Draft editions only.",
-    tag: "highlights",
+    summary: "Delete one of your highlights and its photos, before the deadline. Marks the page stale.",
+    tag: "pages",
     auth: "user",
     phase: 4,
     params: highlightIdParams,
     success: { status: 200, schema: deletedSchema },
     errors: ["bad_request", "not_found", "edition_locked", ...AUTHED],
   }),
-
-  // ---------- Photos ----------
   addPhoto: route({
     method: "POST",
     path: "/api/highlights/{highlightId}/photos",
-    summary: "Attach a photo to one of the caller's highlights (up to 4). Moderated. Draft editions only.",
+    summary: "Attach a photo to one of your highlights (up to 4). Moderated. Before the deadline only.",
     tag: "photos",
     auth: "user",
     phase: 4,
@@ -473,7 +594,7 @@ export const routes = {
   deletePhoto: route({
     method: "DELETE",
     path: "/api/photos/{photoId}",
-    summary: "Delete one of the caller's photos. Allowed at any time, including after publishing.",
+    summary: "Delete one of your photos. Allowed at any time, including after publishing.",
     tag: "photos",
     auth: "user",
     phase: 4,
@@ -509,7 +630,9 @@ export const routes = {
   runCleanup: route({
     method: "GET",
     path: "/api/internal/cleanup",
-    summary: "Cron: purge expired posts, lapsed sessions, and stale avatar photos (rows and files).",
+    summary:
+      "Cron: purge editions past their 14-day expiry (unless saved), lapsed drafts, and stale avatar " +
+      "photos (rows and files).",
     tag: "internal",
     auth: "cron",
     phase: 6,

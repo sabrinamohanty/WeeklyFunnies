@@ -15,7 +15,7 @@ describe("getConfig", () => {
     expect(c.AI_PROVIDER).toBe("stub");
     expect(c.RETENTION_WINDOW_DAYS).toBe(30);
     expect(c.RETENTION_LOGOUT_GRACE_HOURS).toBe(24);
-    expect(c.RETENTION_PUBLISHED_DAYS).toBe(30);
+    expect(c.RETENTION_PUBLISHED_DAYS).toBe(14);
     expect(c.SELFIE_MAX_AGE_MINUTES).toBe(60);
     expect(c.AI_LIVE_TESTS).toBe(false);
   });

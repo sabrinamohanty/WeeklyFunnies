@@ -86,10 +86,22 @@ describe("GET/PATCH /api/me", () => {
       birthday: null,
       zodiacSign: null,
       onboarded: false,
+      style: "classic",
       look: null,
-      avatars: [],
+      avatarUrl: null,
     });
-    expect(profile).not.toHaveProperty("avatarUrl");
+  });
+
+  it("sets the person's own art style and rejects unknown ones", async () => {
+    const patch = (body: unknown) =>
+      call(patchMe, { method: "PATCH", path: "/api/me", token: ama.token, body });
+    expect((await expectOk(await patch({ style: "superhero" }), routes.updateMe)).profile.style).toBe(
+      "superhero",
+    );
+    await expectError(await patch({ style: "hero" }), 400, "bad_request");
+    expect((await expectOk(await patch({ style: "classic" }), routes.updateMe)).profile.style).toBe(
+      "classic",
+    );
   });
 
   it("sets name and birthday, deriving the zodiac sign", async () => {

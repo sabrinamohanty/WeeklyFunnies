@@ -22,8 +22,11 @@ describe("proxy", () => {
   it("passes through known method and path pairs", () => {
     expect(call("GET", "/api/health").headers.get("x-middleware-next")).toBe("1");
     expect(call("PATCH", `/api/highlights/${ID}`).headers.get("x-middleware-next")).toBe("1");
-    expect(call("POST", "/api/panel").headers.get("x-middleware-next")).toBe("1");
-    expect(call("POST", "/api/story").headers.get("x-middleware-next")).toBe("1");
+    expect(call("POST", `/api/pages/${ID}/panels/2`).headers.get("x-middleware-next")).toBe("1");
+    expect(call("PUT", "/api/pages/current").headers.get("x-middleware-next")).toBe("1");
+    expect(call("GET", "/api/weather").headers.get("x-middleware-next")).toBe("1");
+    expect(call("POST", "/api/panel").status).toBe(404);
+    expect(call("POST", "/api/story").status).toBe(404);
   });
 
   it("answers unknown paths with a JSON 404 envelope", async () => {
@@ -47,7 +50,7 @@ describe("proxy", () => {
 });
 
 describe("CORS", () => {
-  const preflight = (origin: string, method = "POST", path = "/api/highlights") =>
+  const preflight = (origin: string, method = "POST", path = `/api/pages/${ID}/highlights`) =>
     call("OPTIONS", path, { origin, "access-control-request-method": method });
 
   it("sends no CORS headers when no origins are configured", () => {

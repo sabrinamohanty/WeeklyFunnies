@@ -1,4 +1,5 @@
 import type { StyleKey, ZodiacSign } from "@/lib/contract/common";
+import type { StorySection } from "@/lib/contract/pages";
 import type { AvatarTraits } from "@/lib/contract/profile";
 
 export interface ImageBytes {
@@ -6,7 +7,7 @@ export interface ImageBytes {
   mimeType: "image/png" | "image/jpeg" | "image/webp";
 }
 
-/** A style preset: the key the paper stores and the prompt fragment design owns (see styles.ts). */
+/** A style preset: the key the person picked and the prompt fragment design owns (see styles.ts). */
 export interface StyleConfig {
   key: StyleKey;
   fragment: string;
@@ -36,65 +37,64 @@ export interface CallMeta {
   outputTokens?: number;
 }
 
-export const STORY_LIMITS = {
-  people: 8,
-  highlights: 24,
+export const PAGE_AI_LIMITS = {
+  highlights: 3,
   panels: 4,
   dialoguePerPanel: 2,
   dialogueWords: 12,
   captionWords: 15,
-  charactersPerPanel: 2,
-  paragraphsMin: 3,
-  paragraphsMax: 5,
   headline: 120,
+  body: 600,
   title: 80,
-  body: 1_500,
   scene: 300,
 } as const;
 
-// ---------- Story (what the AiService returns, with real ids) ----------
+// ---------- Page (what the AiService returns, with real ids) ----------
 
-export interface StoryDialogue {
-  speakerUserId: string;
-  speaker: string;
-  text: string;
-  side: "left" | "right";
-}
-
-export interface StoryPanel {
-  /** What to draw. Server-side only: never shown to readers. */
-  scene: string;
-  caption: string | null;
-  dialogue: StoryDialogue[];
-  characterUserIds: string[];
-  /** The highlights this panel depicts. Their photos are pinned to the panel. */
-  highlightIds: string[];
-}
-
-export interface Story {
-  article: { headline: string; bylineUserId: string; byline: string; body: string };
-  comic: { title: string; panels: StoryPanel[] } | null;
-}
-
-export interface StoryPerson {
+export interface PageAuthor {
   userId: string;
   /** Display name. The service reduces it to a letters-only first name before use. */
   name: string;
+  /** Profile city name, if set. Optional context for headlines ("Austin Resident..."). */
+  city?: string | null;
 }
 
-export interface StoryHighlight {
+export interface PageHighlight {
   id: string;
-  userId: string;
   text: string;
   serious: boolean;
-  /** False for serious highlights by default. These appear in the article only, never the comic. */
+  /** Forced off for serious highlights. Highlights not in the comic still get a story. */
   inComic: boolean;
 }
 
-export interface StoryCharacter {
+export interface PageStory {
+  highlightId: string;
+  section: StorySection;
+  headline: string;
+  body: string;
+}
+
+export interface PagePanel {
+  /** What to draw. Server-side only: never shown to readers. */
+  scene: string;
+  caption: string | null;
+  /** Spoken by the page's author. */
+  dialogue: Array<{ text: string; side: "left" | "right" }>;
+  /** The highlight this panel depicts. Its photos are pinned to the panel. */
+  highlightId: string;
+}
+
+export interface PageDraft {
+  /** One per highlight, in input order. */
+  stories: PageStory[];
+  comic: { title: string; panels: PagePanel[] } | null;
+}
+
+/** The person drawn in a panel: always the page's author. */
+export interface PanelCharacter {
   name: string;
   look: string;
-  /** The character's avatar in the paper's style, if one exists. Sent as a reference image. */
+  /** Their avatar in their style, if one exists. Sent as a reference image. */
   avatar?: ImageBytes;
 }
 
@@ -124,7 +124,7 @@ export interface ModerationResult {
 
 // ---------- Provider and moderator (vendor layer) ----------
 
-export type JsonTask = "story" | "horoscope";
+export type JsonTask = "page" | "story" | "horoscope";
 export type ImageTask = "avatar" | "panel";
 
 /**
@@ -151,8 +151,8 @@ export interface AiProvider {
       /** Built from validated fields by a fixed template. Never raw user text. */
       prompt: string;
       /**
-       * Avatar step: the person's photo, if they gave one. Panel step: the avatars of the characters
-       * in frame. Empty means text-only generation.
+       * Avatar step: the person's photo, if they gave one. Panel step: the person's avatar. Empty
+       * means text-only generation.
        */
       references: ImageBytes[];
       aspectRatio: "1:1" | "4:3";
@@ -172,7 +172,7 @@ export interface Moderator {
 
 // ---------- Service (what routes call) ----------
 
-export interface StoryResult extends Story {
+export interface PageResult extends PageDraft {
   usedFallback: boolean;
 }
 
@@ -188,19 +188,26 @@ export interface AiService {
   ): Promise<{ serious: boolean; moderation: ModerationResult }>;
   /** Moderates an uploaded photo before it's stored or sent to any model. */
   checkPhoto(input: { image: ImageBytes }, ctx: AiCallContext): Promise<void>;
+  /** Moderates text the author typed over generated text (headlines, stories, captions). */
+  checkEdit(input: { text: string; field: string }, ctx: AiCallContext): Promise<void>;
   /** Turns the trait form into the fixed look text. Moderates the free-text note. */
   describeLook(input: { traits: AvatarTraits }, ctx: AiCallContext): Promise<{ look: string }>;
   generateAvatar(
     input: { look: string; photo?: ImageBytes; style: StyleConfig },
     ctx: AiCallContext,
   ): Promise<ImageBytes>;
-  /** One article and one 4-panel comic for the whole edition. */
-  writeStory(
-    input: { weekLabel: string; people: StoryPerson[]; highlights: StoryHighlight[] },
+  /** One person's page: a story per highlight and a 4-panel comic starring them. */
+  writePage(
+    input: { weekLabel: string; author: PageAuthor; highlights: PageHighlight[] },
     ctx: AiCallContext,
-  ): Promise<StoryResult>;
+  ): Promise<PageResult>;
+  /** A new story for one highlight, different from the previous headline. */
+  rewriteStory(
+    input: { weekLabel: string; author: PageAuthor; highlight: PageHighlight; previousHeadline?: string },
+    ctx: AiCallContext,
+  ): Promise<{ story: PageStory; usedFallback: boolean }>;
   generatePanel(
-    input: { scene: string; characters: StoryCharacter[]; style: StyleConfig },
+    input: { scene: string; character: PanelCharacter; style: StyleConfig },
     ctx: AiCallContext,
   ): Promise<ImageBytes>;
   generateHoroscope(input: { sign: ZodiacSign; weekStart: string }, ctx: AiCallContext): Promise<string>;

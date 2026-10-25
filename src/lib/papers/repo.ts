@@ -1,5 +1,5 @@
 import type { z } from "zod";
-import type { StyleKey, ZodiacSign } from "@/lib/contract/common";
+import type { ZodiacSign } from "@/lib/contract/common";
 import type { inviteSchema, memberSchema, paperSchema } from "@/lib/contract/papers";
 import { serviceDb } from "@/lib/db/client";
 import { unwrap, unwrapMaybe } from "@/lib/db/errors";
@@ -48,7 +48,7 @@ export async function listPapers(userId: string): Promise<Paper[]> {
   const rows = unwrap(
     await serviceDb()
       .from("paper_members")
-      .select("role, papers!inner(id, name, style, created_at)")
+      .select("role, papers!inner(id, name, created_at)")
       .eq("user_id", userId),
   );
   const counts = await memberCounts(rows.map((r) => r.papers.id));
@@ -56,7 +56,6 @@ export async function listPapers(userId: string): Promise<Paper[]> {
     .map((r) => ({
       id: r.papers.id,
       name: r.papers.name,
-      style: r.papers.style as StyleKey,
       role: r.role,
       memberCount: counts.get(r.papers.id) ?? 0,
       createdAt: r.papers.created_at,
@@ -66,13 +65,12 @@ export async function listPapers(userId: string): Promise<Paper[]> {
 
 export async function getPaper(paperId: string, role: Role): Promise<Paper> {
   const p = unwrap(
-    await serviceDb().from("papers").select("id, name, style, created_at").eq("id", paperId).single(),
+    await serviceDb().from("papers").select("id, name, created_at").eq("id", paperId).single(),
   );
   const counts = await memberCounts([paperId]);
   return {
     id: p.id,
     name: p.name,
-    style: p.style as StyleKey,
     role,
     memberCount: counts.get(paperId) ?? 0,
     createdAt: p.created_at,
@@ -103,14 +101,11 @@ export async function listMembers(paperId: string): Promise<Member[]> {
   }));
 }
 
-export async function createPaper(userId: string, name: string, style: StyleKey): Promise<string> {
-  return unwrap(await serviceDb().rpc("create_paper", { p_user: userId, p_name: name, p_style: style }));
+export async function createPaper(userId: string, name: string): Promise<string> {
+  return unwrap(await serviceDb().rpc("create_paper", { p_user: userId, p_name: name }));
 }
 
-export async function updatePaper(
-  paperId: string,
-  changes: { name?: string; style?: StyleKey },
-): Promise<void> {
+export async function updatePaper(paperId: string, changes: { name: string }): Promise<void> {
   unwrap(await serviceDb().from("papers").update(changes).eq("id", paperId).select("id").single());
 }
 
@@ -132,6 +127,18 @@ function toInvite(r: {
 }
 
 const INVITE_COLUMNS = "id, created_at, expires_at, revoked_at";
+
+/** Short codes can repeat; a new code must not match any invite that is still usable. */
+export async function activeInviteHashExists(codeHash: string): Promise<boolean> {
+  const { count, error } = await serviceDb()
+    .from("invites")
+    .select("id", { count: "exact", head: true })
+    .eq("code_hash", codeHash)
+    .is("revoked_at", null)
+    .gt("expires_at", new Date().toISOString());
+  if (error) throw new ApiError("internal");
+  return (count ?? 0) > 0;
+}
 
 export async function createInvite(paperId: string, userId: string, codeHash: string): Promise<Invite> {
   const db = serviceDb();

@@ -9,8 +9,8 @@ import type {
   ImageBytes,
   Moderator,
   ModerationResult,
-  StoryHighlight,
-  StoryPerson,
+  PageAuthor,
+  PageHighlight,
 } from "@/lib/ai/types";
 import { MemoryRateLimiter } from "@/lib/ratelimit";
 
@@ -30,27 +30,22 @@ export const PHOTO: ImageBytes = { bytes: solidPng([200, 150, 100]), mimeType: "
 export const ctx = (userId = "user-1") => ({ requestId: "req_test", userId });
 
 export const AMA = "11111111-1111-4111-8111-111111111111";
-export const BEN = "22222222-2222-4222-8222-222222222222";
 export const H1 = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 export const H2 = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+export const H3 = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 
-export const PEOPLE: StoryPerson[] = [
-  { userId: AMA, name: "Ama Serwaa" },
-  { userId: BEN, name: "Ben Okafor" },
-];
+export const AUTHOR: PageAuthor = { userId: AMA, name: "Ama Serwaa", city: "Accra" };
 
-export const highlight = (text: string, extra: Partial<StoryHighlight> = {}): StoryHighlight => ({
+export const highlight = (text: string, extra: Partial<PageHighlight> = {}): PageHighlight => ({
   id: H1,
-  userId: AMA,
   text,
   serious: false,
   inComic: true,
   ...extra,
 });
 
-export const BEN_HIGHLIGHT: StoryHighlight = {
+export const BREAD: PageHighlight = {
   id: H2,
-  userId: BEN,
   text: "Baked sourdough bread for the first time",
   serious: false,
   inComic: true,

@@ -1,7 +1,7 @@
 import type { ZodiacSign } from "@/lib/contract/common";
-import { cleanText, codePointLength } from "@/lib/contract/text";
-import { STORY_LIMITS } from "@/lib/ai/types";
-import type { RefStory, StoryCheckInput } from "./output";
+import { cleanText } from "@/lib/contract/text";
+import { PAGE_AI_LIMITS } from "@/lib/ai/types";
+import type { PageCheckInput, RefPage, RefStory } from "./output";
 import { containsLink, containsMarkup, redactPersonalData } from "./redact";
 
 const GENERIC = "Shared a moment from the week.";
@@ -27,40 +27,36 @@ export function plainFallbackText(text: string, max: number): string {
   return cut;
 }
 
-/**
- * Safe default when the story fails validation twice or is blocked by moderation: the article is
- * each person's own words, and the comic uses neutral scenes with no captions or dialogue.
- */
-export function fallbackStory(input: StoryCheckInput): RefStory {
-  const authors = input.people.filter((p) => input.highlights.some((h) => h.personRef === p.ref));
-  const perParagraph = Math.floor(STORY_LIMITS.body / Math.max(1, authors.length)) - 4;
-  const paragraphs = authors.map((p) => {
-    const words = input.highlights
-      .filter((h) => h.personRef === p.ref)
-      .map((h) => h.text)
-      .join(". ");
-    return `${p.name}: ${plainFallbackText(words, Math.max(40, perParagraph - codePointLength(p.name) - 2))}`;
-  });
-  const body = Array.from(paragraphs.join("\n\n")).slice(0, STORY_LIMITS.body).join("") || GENERIC;
-
-  const comicHighlights = input.highlights.filter((h) => h.inComic && !h.serious);
-  const comic: RefStory["comic"] = comicHighlights.length
-    ? {
-        title: "Meanwhile, this week",
-        panels: FALLBACK_SCENES.map((scene, i) => {
-          const h = comicHighlights[i % comicHighlights.length]!;
-          return { scene, caption: null, dialogue: [], characterRefs: [h.personRef], momentRefs: [h.ref] };
-        }),
-      }
-    : null;
-
+/** Safe default for one story: the person's own words under a plain headline. */
+export function fallbackStoryFor(input: PageCheckInput, ref: string, index = 0): RefStory {
+  const h = input.highlights.find((x) => x.ref === ref)!;
   return {
-    article: {
-      headline: `The week of ${input.weekLabel}`,
-      bylineRef: (authors[0] ?? input.people[0]!).ref,
-      body,
-    },
-    comic,
+    highlightRef: ref,
+    section: "news",
+    headline: index === 0 ? `News from ${input.name}` : `More from ${input.name}`,
+    body: plainFallbackText(h.text, PAGE_AI_LIMITS.body),
+  };
+}
+
+/**
+ * Safe default when the page fails validation twice or is blocked by moderation: each story is the
+ * person's own words, and the comic uses neutral scenes with no captions or dialogue.
+ */
+export function fallbackPage(input: PageCheckInput): RefPage {
+  const eligible = input.highlights.filter((h) => h.inComic && !h.serious);
+  return {
+    stories: input.highlights.map((h, i) => fallbackStoryFor(input, h.ref, i)),
+    comic: eligible.length
+      ? {
+          title: `${input.name}'s week`,
+          panels: FALLBACK_SCENES.map((scene, i) => ({
+            scene,
+            caption: null,
+            dialogue: [],
+            momentRef: eligible[i % eligible.length]!.ref,
+          })),
+        }
+      : null,
   };
 }
 

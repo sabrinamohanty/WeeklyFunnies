@@ -1,8 +1,9 @@
 import { getConfig } from "@/lib/config/env";
 import { routes } from "@/lib/contract/routes";
 import { defineRoute } from "@/lib/http/handler";
-import { formatInviteCode, generateInviteCode, hashInviteCode } from "@/lib/papers/invite-code";
-import { createInvite, listInvites, requireOwner } from "@/lib/papers/repo";
+import { ApiError } from "@/lib/http/errors";
+import { generateInviteCode, hashInviteCode } from "@/lib/papers/invite-code";
+import { activeInviteHashExists, createInvite, listInvites, requireOwner } from "@/lib/papers/repo";
 
 export const GET = defineRoute(routes.listInvites, async ({ user, params }) => {
   await requireOwner(params.paperId, user.id);
@@ -11,11 +12,13 @@ export const GET = defineRoute(routes.listInvites, async ({ user, params }) => {
 
 export const POST = defineRoute(routes.createInvite, async ({ user, params }) => {
   await requireOwner(params.paperId, user.id);
-  const code = generateInviteCode();
-  const invite = await createInvite(
-    params.paperId,
-    user.id,
-    hashInviteCode(code, getConfig().INVITE_CODE_PEPPER),
-  );
-  return { data: { invite: { ...invite, code: formatInviteCode(code) } } };
+  const pepper = getConfig().INVITE_CODE_PEPPER;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const code = generateInviteCode();
+    const codeHash = hashInviteCode(code, pepper);
+    if (await activeInviteHashExists(codeHash)) continue;
+    const invite = await createInvite(params.paperId, user.id, codeHash);
+    return { data: { invite: { ...invite, code } } };
+  }
+  throw new ApiError("internal");
 });

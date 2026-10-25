@@ -312,7 +312,6 @@ export type Database = {
           created_by: string | null;
           id: string;
           name: string;
-          style: string;
           updated_at: string;
         };
         ComputedFields: never;
@@ -321,7 +320,6 @@ export type Database = {
           created_by?: string | null;
           id?: string;
           name: string;
-          style?: string;
           updated_at?: string;
         };
         Update: {
@@ -329,7 +327,6 @@ export type Database = {
           created_by?: string | null;
           id?: string;
           name?: string;
-          style?: string;
           updated_at?: string;
         };
         Relationships: [
@@ -410,6 +407,7 @@ export type Database = {
           logged_out_at: string | null;
           look: string | null;
           name: string | null;
+          style: string;
           timezone: string | null;
           updated_at: string;
           zodiac_sign: string | null;
@@ -431,6 +429,7 @@ export type Database = {
           logged_out_at?: string | null;
           look?: string | null;
           name?: string | null;
+          style?: string;
           timezone?: string | null;
           updated_at?: string;
           zodiac_sign?: never;
@@ -451,6 +450,7 @@ export type Database = {
           logged_out_at?: string | null;
           look?: string | null;
           name?: string | null;
+          style?: string;
           timezone?: string | null;
           updated_at?: string;
           zodiac_sign?: never;
@@ -503,7 +503,7 @@ export type Database = {
       [_ in never]: never;
     };
     Functions: {
-      create_paper: { Args: { p_name: string; p_style?: string; p_user: string }; Returns: string };
+      create_paper: { Args: { p_name: string; p_user: string }; Returns: string };
       join_paper: { Args: { p_code_hash: string; p_user: string }; Returns: string };
       rate_limit_hit: {
         Args: { p_key: string; p_limit: number; p_window_seconds: number };

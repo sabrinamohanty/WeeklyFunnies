@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { AiProvider, CallContext, ImageTask, JsonTask } from "../../types";
+import { unwrapUntrusted } from "@/lib/safety/delimit";
 import { solidPng } from "./png";
 
 /** Ways the stub can misbehave, so tests can drive every failure path without a vendor. */
@@ -45,81 +46,58 @@ function fit(parts: string[], max: number): string {
 
 interface Parsed {
   week: string;
-  people: Array<{ ref: string; name: string }>;
-  highlights: Array<{ ref: string; personRef: string; comic: boolean; serious: boolean; text: string }>;
+  name: string;
+  highlights: Array<{ ref: string; comic: boolean; serious: boolean; text: string }>;
+  previous?: string;
 }
 
 function parse(user: string): Parsed {
-  const people = [
-    ...user.matchAll(/- id: (p\d+) \| name:\n<<<NAME id=(\w+)>>>\n([\s\S]*?)\n<<<END NAME id=\2>>>/g),
-  ].map((m) => ({ ref: m[1]!, name: m[3]! }));
   const highlights = [
     ...user.matchAll(
-      /\[(h\d+)\] person: (p\d+) \| comic: (yes|no) \| tone: (serious|light)\n<<<HIGHLIGHT id=(\w+)>>>\n([\s\S]*?)\n<<<END HIGHLIGHT id=\5>>>/g,
+      /\[(h\d+)\] comic: (yes|no) \| tone: (serious|light)\n<<<HIGHLIGHT id=(\w+)>>>\n([\s\S]*?)\n<<<END HIGHLIGHT id=\4>>>/g,
     ),
-  ].map((m) => ({
-    ref: m[1]!,
-    personRef: m[2]!,
-    comic: m[3] === "yes",
-    serious: m[4] === "serious",
-    text: m[6]!,
-  }));
-  return { week: /^Week of (.*)$/m.exec(user)?.[1] ?? "", people, highlights };
+  ].map((m) => ({ ref: m[1]!, comic: m[2] === "yes", serious: m[3] === "serious", text: m[5]! }));
+  return {
+    week: /^Week of (.*)$/m.exec(user)?.[1] ?? "",
+    name: unwrapUntrusted(user, "name") ?? "Friend",
+    highlights,
+    previous: unwrapUntrusted(user, "previous"),
+  };
 }
 
-/** Writes like an ideal model: only the people's own words, plain text, valid shape and references. */
-function writeStory(user: string) {
-  const { week, people, highlights } = parse(user);
-  const name = (ref: string) => people.find((p) => p.ref === ref)?.name ?? "Friend";
-  const authors = people.filter((p) => highlights.some((h) => h.personRef === p.ref));
-
-  const lead = highlights.find((h) => !h.serious) ?? highlights[0]!;
-  const leadWords = words(lead.text);
-  const headline = leadWords.length
-    ? fit([`${name(lead.personRef)}:`, ...leadWords.slice(0, 8)], 120)
-    : `${name(lead.personRef)} had a week`;
-
-  // At most 5 paragraphs: one per author, with any authors past the fourth sharing the fifth.
-  const groups =
-    authors.length <= 5
-      ? authors.map((a) => [a])
-      : [...authors.slice(0, 4).map((a) => [a]), authors.slice(4)];
-  const paragraphs = groups.map((group) => {
-    const mine = highlights.filter((h) => group.some((p) => p.ref === h.personRef));
-    const who = group.map((p) => p.name).join(" and ");
-    const said = fit(
-      mine.flatMap((h) => words(h.text)),
-      200,
-    );
-    const open = mine.some((h) => h.serious)
-      ? `${who} shared something from the week.`
-      : `${who} had a week worth sharing.`;
-    return said ? `${open} In their words: ${said}.` : open;
-  });
-  const padding = [`The week of ${week} is in the books.`, "It was quite a week for the group."];
-  while (paragraphs.length < 3) paragraphs.push(padding[paragraphs.length - 1] ?? padding[1]!);
-
-  const comicHighlights = highlights.filter((h) => h.comic && !h.serious);
-  const comic = comicHighlights.length
-    ? {
-        title: "Meanwhile, this week",
-        panels: SCENES.map((scene, i) => {
-          const h = comicHighlights[i % comicHighlights.length]!;
-          const caption = fit(words(h.text).slice(0, 12), 110);
-          return {
-            scene,
-            caption: caption || null,
-            dialogue: [{ speaker: name(h.personRef), text: "What a week!", side: i % 2 ? "right" : "left" }],
-            characters: [h.personRef],
-            moments: [h.ref],
-          };
-        }),
-      }
-    : null;
-
+/** Writes like an ideal model: only the person's own words, plain text, valid shape and references. */
+function writeStory(name: string, h: Parsed["highlights"][number], again = false) {
+  const said = words(h.text);
+  const lead = again ? `${name} returns:` : `${name}:`;
   return {
-    article: { headline, byline: authors[0]?.name ?? people[0]!.name, body: paragraphs.join("\n\n") },
-    comic,
+    section: "news" as const,
+    headline: said.length ? fit([lead, ...said.slice(0, 8)], 120) : `${name} had a week`,
+    body: said.length
+      ? `${name} shared this from the week: ${fit(said, 200)}.`
+      : `${name} shared some news this week.`,
+  };
+}
+
+function writePage(user: string) {
+  const { name, highlights } = parse(user);
+  const comicHighlights = highlights.filter((h) => h.comic && !h.serious);
+  return {
+    stories: highlights.map((h) => ({ highlight: h.ref, ...writeStory(name, h) })),
+    comic: comicHighlights.length
+      ? {
+          title: "Meanwhile, this week",
+          panels: SCENES.map((scene, i) => {
+            const h = comicHighlights[i % comicHighlights.length]!;
+            const caption = fit(words(h.text).slice(0, 12), 110);
+            return {
+              scene,
+              caption: caption || null,
+              dialogue: [{ text: "What a week!", side: i % 2 ? "right" : "left" }],
+              moment: h.ref,
+            };
+          }),
+        }
+      : null,
   };
 }
 
@@ -158,7 +136,33 @@ export class StubProvider implements AiProvider {
       return { raw: base, meta };
     }
 
-    const out = writeStory(req.user);
+    if (req.task === "story") {
+      const parsed = parse(req.user);
+      const story = writeStory(parsed.name, parsed.highlights[0]!, Boolean(parsed.previous));
+      switch (fault) {
+        case "fenced":
+          return { raw: "```json\n" + JSON.stringify(story) + "\n```", meta };
+        case "extra_fields":
+          return { raw: { ...story, approved: true }, meta };
+        case "link":
+          return { raw: { ...story, body: `${story.body} More at https://evil.example/x` }, meta };
+        case "markup":
+          return { raw: { ...story, headline: `<b>${story.headline}</b>` }, meta };
+        case "ungrounded":
+          return { raw: { ...story, body: `${story.body} Later, Beyoncé joined them in Paris.` }, meta };
+        case "too_long":
+          return { raw: { ...story, headline: "word ".repeat(60) }, meta };
+        default:
+          return { raw: JSON.stringify(story), meta };
+      }
+    }
+
+    const out = writePage(req.user);
+    const [first, ...rest] = out.stories;
+    const withFirst = (patch: Partial<NonNullable<typeof first>>) => ({
+      ...out,
+      stories: [{ ...first!, ...patch }, ...rest],
+    });
     const panels = out.comic?.panels ?? [];
     switch (fault) {
       case "fenced":
@@ -166,33 +170,18 @@ export class StubProvider implements AiProvider {
       case "extra_fields":
         return { raw: { ...out, approved: true }, meta };
       case "link":
-        return {
-          raw: {
-            ...out,
-            article: { ...out.article, body: `${out.article.body} More at https://evil.example/x` },
-          },
-          meta,
-        };
+        return { raw: withFirst({ body: `${first!.body} More at https://evil.example/x` }), meta };
       case "markup":
-        return {
-          raw: { ...out, article: { ...out.article, headline: `<b>${out.article.headline}</b>` } },
-          meta,
-        };
+        return { raw: withFirst({ headline: `<b>${first!.headline}</b>` }), meta };
       case "ungrounded":
-        return {
-          raw: {
-            ...out,
-            article: { ...out.article, body: `${out.article.body} Later, Beyoncé joined them in Paris.` },
-          },
-          meta,
-        };
+        return { raw: withFirst({ body: `${first!.body} Later, Beyoncé joined them in Paris.` }), meta };
       case "too_long":
-        return { raw: { ...out, article: { ...out.article, headline: "word ".repeat(60) } }, meta };
+        return { raw: withFirst({ headline: "word ".repeat(60) }), meta };
       case "bad_refs":
         return {
           raw: {
             ...out,
-            comic: out.comic && { ...out.comic, panels: panels.map((p) => ({ ...p, characters: ["p99"] })) },
+            comic: out.comic && { ...out.comic, panels: panels.map((p) => ({ ...p, moment: "h99" })) },
           },
           meta,
         };

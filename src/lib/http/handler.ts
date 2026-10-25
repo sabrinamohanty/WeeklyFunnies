@@ -123,6 +123,13 @@ export function defineRoute<C extends RouteContract>(
       if (contract.auth !== "cron") {
         await enforceRateLimit(limiter, `ip:${ip}`, config.RATE_LIMIT_IP_PER_MINUTE);
       }
+      if (contract.rateLimit?.perIpPerMinute) {
+        await enforceRateLimit(
+          limiter,
+          `ip:${ip}:${routeId}`,
+          Math.max(1, Math.ceil(contract.rateLimit.perIpPerMinute * config.RATE_LIMIT_ROUTE_SCALE)),
+        );
+      }
 
       let user: AuthUser | null = null;
       if (contract.auth === "user") {

@@ -55,7 +55,7 @@ pnpm dev
   (service role only).
 - `src/lib/db/`, `src/lib/papers/`, `src/lib/profile/`, `src/lib/geo/`: the service-key client, repos,
   invite codes, and the Open-Meteo geocoder.
-- `tests/ai/`: the full text-case suite through highlight moderation, the story writer and name fields, failure paths, and safety
+- `tests/ai/`: the full text-case suite through highlight moderation, the page writer, name and city fields, failure paths, and safety
   unit tests. `live.test.ts` runs only with `AI_LIVE_TESTS=1`.
 - `tests/integration/`: two-user table tests, storage tests, database invariant tests, and API tests for
   `me`, papers, invites, and joining.
@@ -67,10 +67,13 @@ pnpm dev
   rather than letting the request through.
 - **Authorization order:** signed in, then member of the paper, then owner where needed. Papers you're not
   in return `404` (never `403`), so ids can't be probed. Members hitting owner-only routes get `403`.
-- **Invite codes:** 12 Crockford base32 characters from a secure random source, shown once as
-  `XXXX-XXXX-XXXX`. Only an HMAC-SHA256 hash with `INVITE_CODE_PEPPER` is stored. Input ignores case,
-  spaces and dashes. At most 5 active invites per paper. Unknown, expired and revoked codes all give the
-  same `404`, and joining is limited to 5 attempts per minute per user.
+- **Invite codes:** 6 Crockford base32 characters (30 bits) from a secure random source, shown once. Only
+  an HMAC-SHA256 hash with `INVITE_CODE_PEPPER` is stored. Input ignores case, spaces and dashes and reads
+  `O` as `0`, `I` and `L` as `1`. At most 5 active invites per paper. Unknown, expired and revoked codes
+  all give the same `404`. Joining is limited to 5 attempts a minute per user and 20 per IP, and codes
+  expire in 7 days, which keeps guessing a live code impractical. A new code is regenerated if its hash
+  matches an invite that is still usable; expired codes may be reused (migration `…0600` dropped the
+  unique constraint on the hash).
 - **Profile city:** the app sends a geocode id; the server looks it up and stores name, country, timezone
   and coordinates. Coordinates are never returned.
 - **Rate limits:** stored in Postgres (`RATE_LIMIT_STORE=postgres`), keyed by a sha256 hash, so limits
@@ -79,41 +82,48 @@ pnpm dev
 - **New env vars:** `INVITE_CODE_PEPPER` (required, at least 32 chars), `RATE_LIMIT_STORE`, and
   `RATE_LIMIT_ROUTE_SCALE` (tests only; config refuses anything but 1 in production).
 
-## AI layer (Phase 3, aligned with the comic pipeline handoff)
+## AI layer (Phase 3, aligned with the web app)
 
-The handoff (`comic-pipeline-handoff.md`) replaced the per-highlight design. What changed and why:
+Contract 0.5.0 follows the web app (`WeeklyFunnies-frontend`) where it differs from the comic pipeline
+handoff. What changed and why:
 
-- **One story per edition.** The owner generates one article and one 4-panel comic from everyone's
-  approved highlights. Highlights are moderated when written and generate nothing on their own.
-- **Styles per paper.** The owner picks `classic`, `manga`, `sketch`, or `superhero`; the fragment is added
-  to every avatar and panel prompt. `AI_STYLE_ID` is gone.
+- **One page per person per week.** Each person's page has one story per highlight (section, headline,
+  body) and a 4-panel comic starring only them. Highlights are moderated when written and generate
+  nothing on their own. The handoff's single group article per edition is gone, because the app shows
+  each friend's stories and strip separately and lets them rewrite a story or redraw a panel.
+- **One page, several papers.** A person picks which papers a page goes to. It's generated and edited
+  once and appears in each. It locks at the **earliest** linked deadline, so there's one lock time.
+- **Styles per person.** Each person picks `classic`, `manga`, `sketch`, or `superhero` on their profile;
+  the fragment is added to their avatar and panel prompts. `AI_STYLE_ID` is gone.
 - **Looks.** The trait form becomes a fixed look text, stored and reused word for word in every panel.
   Avatars come from the look alone or the look plus an optional photo (moderated, own avatar only).
 - **Speech is never drawn.** Captions and dialogue come back as JSON and the client overlays them.
-- **Handoff route shapes, server-authoritative.** `/api/story`, `/api/panel`, `/api/avatar` take the
-  handoff's bodies plus `editionId`; echoed ids are verified and stored data is always what's used, so a
-  client can't send its own scene to the image model.
+- **Server-authoritative.** Panel routes take only an index; the stored scene, look and style are always
+  what's used, so a client can't send its own scene to the image model. Edited text is moderated
+  (`checkEdit`).
 
 Safety pipeline (details in `docs/api-contract.md` under "AI layer"):
 
 - User text is redacted (emails, links, phones), moderated, and sent only inside delimiters with a random
-  per-call id. People and highlights go to the model as `p1`/`h1` refs, never real ids. System prompts are
-  constants.
-- Output must match a strict schema (code fences stripped) and pass checks: byline, 3 to 5 paragraphs,
-  4 panels, word limits, no quoted text in scenes, valid characters, speakers and moments, plain text,
-  serious highlights kept out of the comic, and grounding. One retry, then a safe fallback story built
-  from everyone's own words. Generated text is moderated too.
+  per-call id. The city is redacted the same way. Highlights go to the model as `h1` refs, never real ids.
+  System prompts are constants.
+- Output must match a strict schema (code fences stripped) and pass checks: one story per highlight in
+  order, known sections, lengths, no exclamation marks in serious stories, 4 panels from comic-eligible
+  highlights, word limits, no quoted text in scenes, plain text, and grounding. Headlines are asked for in
+  sentence case, because grounding treats capitalized words as names. One retry, then safe fallback
+  text built from the person's own words. Generated text is moderated too.
 - Image prompts are the handoff's fixed templates, with fields reduced to safe characters. Scenes are
   moderated before any image call. Photos are moderated before use.
-- Deadlines, a concurrency cap, circuit breakers, per-user daily caps, a panel cache key (style, cast and
+- Deadlines, a concurrency cap, circuit breakers, per-user daily caps, a panel cache key (style, look and
   scene), and metadata-only logs.
 
 Deviations from the handoff, on purpose:
 
-- **Fallback instead of 502 for the story.** The handoff returns 502 after one retry. The original brief
-  asks for a safe default, so the server stores a fallback story marked `fallback_used` that the owner can
-  edit or regenerate. Provider outages and timeouts still return `503 provider_unavailable`.
-- **`sources` on panels** (the highlight ids a panel shows) so photos pin to panels automatically.
+- **Per-person pages instead of one group story,** and per-person styles instead of per-paper (see above).
+- **Fallback instead of 502.** The handoff returns 502 after one retry. The original brief asks for a safe
+  default, so the server stores fallback text marked `fallback_used` that the author can edit or
+  regenerate. Provider outages and timeouts still return `503 provider_unavailable`.
+- **`highlightId` on panels** so photos pin to panels automatically.
 - **`photoUrl` must be ours.** Avatar photos are uploaded through `POST /api/avatar/photo`; the server
   never fetches a client-supplied URL.
 - **Error responses** keep `code` and `requestId` next to the handoff's `error` string.
@@ -173,26 +183,30 @@ What app roles can do directly (defense in depth; the app is meant to go through
   - drafts use a 30-day sliding window;
   - logout signs out everywhere, hides drafts immediately, and purges them after 24 hours unless the user
     signs back in;
-  - **posts in a published edition are deleted 30 days after that edition was published**, regardless of
-    logout;
+  - **published editions are deleted 14 days after publishing**, regardless of logout, unless the owner
+    saved the edition (kept forever, for every member);
   - the avatar is part of the profile and is kept;
   - the selfie is kept until avatar approval, 1 hour at most.
-- **Papers:** a user can be in several papers. The owner picks the style, generates the story and
-  panels, and publishes. Only approved highlights go into the story. Weeks start Monday in the owner's
-  timezone.
+- **Papers:** a user can be in several papers. Weeks start Monday in the owner's timezone and close at
+  the deadline, Sunday 11:59 p.m. in that timezone. Each member approves their own page; the owner
+  publishes manually after the deadline.
+- **Reactions:** `ha`, `aww`, `hooray`; one per member per story, counted per edition.
+- **Lucky numbers:** computed by the server from the sign and week (`src/lib/editions/lucky.ts`), 1 to 99,
+  never generated by a model.
 - **Invites:** multi-use codes with a 7-day expiry, revocable, stored hashed, with an 8-member cap.
 - **Profile:** full birthday stored, but only month and day are ever shown to others. The user picks a
   city from geocode candidates.
-- **Weather:** the reader's own city, a 7-day forecast cached per city per day.
-- **Limits:** 1 to 3 highlights per person per edition, 4 photos per highlight, 500 characters per
-  highlight.
+- **Weather:** `GET /api/weather` from Open-Meteo. The browser's location first (sent as `lat`/`lon`),
+  then the profile city. Coordinates are rounded to about 10 km and never stored or logged.
+- **Limits:** 1 to 3 highlights per page, 4 photos per highlight, 500 characters per highlight, up to 10
+  papers per page. Per page: 5 regenerations, 10 story rewrites, 12 panel redraws.
 - **Moderation:** self-harm and crisis content is blocked with a supportive message. Other sensitive
   topics force `serious` on.
-- **AI layer:** an `AiService` (safety lives here) over a thin `AiProvider`. One story per edition, styles
-  per paper, looks per person, photo optional. Real vendors (Anthropic, Meta Muse Image) come in Phase 8.
+- **AI layer:** an `AiService` (safety lives here) over a thin `AiProvider`. One page per person per week,
+  style and look per person, photo optional. Real vendors (Anthropic, Meta Muse Image) come in Phase 8.
   A lint rule blocks vendor SDK imports outside `src/lib/ai/providers/real/`.
-- **Draft visibility:** in a draft, members see only their own posts, plus each member's progress status.
-  Others' events appear after publishing. The bundle and row-level security both enforce this.
+- **Draft visibility:** in a draft, members see only their own page, plus each member's progress status.
+  Others' pages appear after publishing. The bundle and row-level security both enforce this.
 - **Age:** no minimum age is enforced for now.
 - **Photo captions:** none. Photos are images only. The "injection in a caption" test applies to name
   fields instead.
@@ -227,10 +241,15 @@ None right now.
   main defence.
 - **Per-instance limits:** the concurrency cap and circuit breakers live in process memory, so each
   serverless instance has its own.
-- **Panels wait for the image** (handoff shape), so the story, avatar and panel routes set
-  `maxDuration = 60`. Check that the Vercel plan allows that duration.
+- **Panels wait for the image**, so the generate, rewrite, avatar and panel routes set `maxDuration = 60`.
+  Check that the Vercel plan allows that duration.
 - **The `events` table still has the old per-highlight columns** (headline, article, panel). Phase 4
-  migrates it to highlights and adds story and panel tables.
+  migrates it to highlights and adds page, page-paper, story, panel, reaction and saved-edition tables.
+- **Browser coordinates reach our server** for weather. They're rounded and never stored or logged, but
+  they do leave the browser. The web app also sends exact coordinates to BigDataCloud for reverse
+  geocoding today; that should go (see the frontend change list).
+- **Shared pages and different deadlines:** a page in papers whose owners live in different timezones
+  locks at the earliest deadline, which can be up to a day earlier than the later paper's deadline.
 - **AI daily caps fail open with the rate-limit store.** If Postgres is unreachable, caps aren't
   enforced, but nothing else works either in that case.
 
@@ -241,5 +260,8 @@ None right now.
 - 0.4.0: bare JSON responses and flat errors; one story per edition with `/api/story` and `/api/panel`;
   `/api/events` became `/api/highlights`; avatars per style with `/api/avatar/photo`; paper `style`; 8-member
   cap; CORS.
+- 0.5.0: one page per person per week under `/api/pages/*` (stories per highlight plus the person's own
+  comic), linked to several papers; style per person; 6-character invite codes and a per-IP join limit;
+  reactions, saved editions, lucky numbers and 14-day retention; `GET /api/weather`.
 
 See the changelog in `docs/api-contract.md`.

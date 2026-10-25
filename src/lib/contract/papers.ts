@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { roleSchema, signedUrl, styleKeySchema, timestamp, uuid, zodiacSignSchema } from "./common";
+import { roleSchema, signedUrl, timestamp, uuid, zodiacSignSchema } from "./common";
 import { TEXT_LIMITS, textField } from "./text";
 
 export const PAPER_MAX_MEMBERS = 8;
@@ -11,7 +11,6 @@ export const paperSchema = z
   .strictObject({
     id: uuid,
     name: z.string(),
-    style: styleKeySchema,
     role: roleSchema.meta({ description: "The caller's role in this paper." }),
     memberCount: z.number().int().nonnegative().max(PAPER_MAX_MEMBERS),
     createdAt: timestamp,
@@ -24,9 +23,7 @@ export const memberSchema = z
     name: z.string().nullable().meta({ description: "Null until the member finishes onboarding." }),
     city: z.string().nullable().meta({ description: "City name only." }),
     zodiacSign: zodiacSignSchema.nullable(),
-    avatarUrl: signedUrl
-      .nullable()
-      .meta({ description: "The member's avatar in the paper's style, if any." }),
+    avatarUrl: signedUrl.nullable().meta({ description: "The member's avatar in their own style, if any." }),
     role: roleSchema,
     joinedAt: timestamp,
   })
@@ -39,15 +36,11 @@ export const paperDetailSchema = paperSchema
 const paperName = textField({ max: TEXT_LIMITS.paperName, description: "Paper name." });
 
 export const createPaperRequestSchema = z
-  .strictObject({ name: paperName, style: styleKeySchema.default("classic") })
+  .strictObject({ name: paperName })
   .meta({ id: "CreatePaperRequest" });
 export const updatePaperRequestSchema = z
-  .strictObject({ name: paperName.optional(), style: styleKeySchema.optional() })
-  .refine((b) => b.name !== undefined || b.style !== undefined, { message: "At least one field is required" })
-  .meta({
-    id: "UpdatePaperRequest",
-    description: "Changing the style applies to panels generated afterwards. Owner only.",
-  });
+  .strictObject({ name: paperName })
+  .meta({ id: "UpdatePaperRequest", description: "Owner only." });
 
 export const paperResponseSchema = z.strictObject({ paper: paperSchema });
 export const paperDetailResponseSchema = z.strictObject({ paper: paperDetailSchema });
@@ -55,14 +48,22 @@ export const papersResponseSchema = z.strictObject({ papers: z.array(paperSchema
 
 // ---------- Invites ----------
 
-/** Crockford base32 without I, L, O, U. Shown to users as XXXX-XXXX-XXXX. */
-export const INVITE_CODE_LENGTH = 12;
+/** Crockford base32: digits and letters without I, L, O, U. Shown to users as six characters, e.g. 7KQ2MX. */
+export const INVITE_CODE_LENGTH = 6;
+
+/** Uppercases, drops spaces and dashes, and reads O as 0 and I or L as 1, as Crockford base32 does. */
+export function normalizeInviteCode(v: string): string {
+  return v.toUpperCase().replace(/[\s-]/g, "").replace(/O/g, "0").replace(/[IL]/g, "1");
+}
+
 const inviteCode = z
   .string()
   .max(32)
-  .transform((v) => v.toUpperCase().replace(/[\s-]/g, ""))
+  .transform(normalizeInviteCode)
   .pipe(z.string().regex(new RegExp(`^[0-9A-HJKMNP-TV-Z]{${INVITE_CODE_LENGTH}}$`), "Invalid code"))
-  .meta({ description: "Invite code. Case-insensitive; spaces and dashes are ignored." });
+  .meta({
+    description: "Invite code. Case-insensitive; spaces and dashes are ignored, O reads as 0, I and L as 1.",
+  });
 
 export const joinRequestSchema = z.strictObject({ code: inviteCode }).meta({ id: "JoinRequest" });
 

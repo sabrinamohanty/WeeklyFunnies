@@ -29,7 +29,7 @@ export const roleSchema = z.enum(["owner", "member"]).meta({ id: "Role" });
 export const STYLE_KEYS = ["classic", "manga", "sketch", "superhero"] as const;
 export const styleKeySchema = z.enum(STYLE_KEYS).meta({
   id: "StyleKey",
-  description: "Art style preset. Set per paper by the owner; avatars and panels use the paper's style.",
+  description: "Art style preset. Each person picks one; their avatar and comic strip use it.",
 });
 export type StyleKey = z.infer<typeof styleKeySchema>;
 

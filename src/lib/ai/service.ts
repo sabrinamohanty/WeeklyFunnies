@@ -5,32 +5,37 @@ import { cleanText, codePointLength, TEXT_LIMITS } from "@/lib/contract/text";
 import { log } from "@/lib/log/logger";
 import type { RateLimiter } from "@/lib/ratelimit";
 import { newBoundary } from "@/lib/safety/delimit";
-import { fallbackHoroscope, fallbackStory } from "@/lib/safety/fallback";
+import { fallbackHoroscope, fallbackPage, fallbackStoryFor } from "@/lib/safety/fallback";
 import { buildLook } from "@/lib/safety/look";
 import {
   checkHoroscopeOutput,
+  checkPageOutput,
   checkStoryOutput,
   horoscopeOutputSchema,
+  pageOutputSchema,
+  pageText,
   storyOutputSchema,
-  storyText,
+  type PageCheckInput,
+  type RefPage,
   type RefStory,
   type RejectReason,
-  type StoryCheckInput,
 } from "@/lib/safety/output";
 import {
   buildAvatarImagePrompt,
   buildHoroscopeUserPrompt,
+  buildPageUserPrompt,
   buildPanelImagePrompt,
   buildStoryUserPrompt,
   HOROSCOPE_SYSTEM_PROMPT,
+  PAGE_SYSTEM_PROMPT,
   STORY_SYSTEM_PROMPT,
 } from "@/lib/safety/prompts";
-import { redactPersonalData } from "@/lib/safety/redact";
+import { redactPersonalData, toPromptSafe } from "@/lib/safety/redact";
 import { AiError } from "./errors";
 import { isValidImage } from "./image";
 import { CircuitBreaker, CircuitOpenError, Semaphore, TimeoutError, withTimeout } from "./resilience";
 import {
-  STORY_LIMITS,
+  PAGE_AI_LIMITS,
   type AiCallContext,
   type AiProvider,
   type AiService,
@@ -41,8 +46,11 @@ import {
   type JsonTask,
   type ModerationResult,
   type Moderator,
-  type Story,
-  type StoryCharacter,
+  type PageAuthor,
+  type PageDraft,
+  type PageHighlight,
+  type PageStory,
+  type PanelCharacter,
   type StyleConfig,
 } from "./types";
 
@@ -65,6 +73,7 @@ export interface AiServiceDeps {
 }
 
 const DAY_MS = 86_400_000;
+const PAGE_JSON_SCHEMA = z.toJSONSchema(pageOutputSchema) as Record<string, unknown>;
 const STORY_JSON_SCHEMA = z.toJSONSchema(storyOutputSchema) as Record<string, unknown>;
 const HOROSCOPE_JSON_SCHEMA = z.toJSONSchema(horoscopeOutputSchema) as Record<string, unknown>;
 
@@ -75,28 +84,69 @@ export function firstNameOf(name: string): string {
   return Array.from(letters).slice(0, 30).join("");
 }
 
-/** Short, unique, letters-only names for the prompt. Duplicates get a last initial, then a number. */
-export function promptNames(fullNames: string[]): string[] {
-  const out: string[] = [];
-  for (const full of fullNames) {
-    const first = firstNameOf(full) || "Friend";
-    let name = first;
-    if (out.includes(name)) {
-      const initial = firstNameOf(cleanText(full, "single-line").split(" ")[1] ?? "")
-        .charAt(0)
-        .toUpperCase();
-      if (initial) name = `${first} ${initial}`;
-    }
-    for (let n = 2; out.includes(name); n++) name = `${first} ${n}`;
-    out.push(name);
-  }
-  return out;
+/** Cache key for a panel image: identical style, character, and scene never pay twice. */
+export function panelCacheKey(scene: string, character: PanelCharacter, style: StyleConfig): string {
+  return createHash("sha256")
+    .update(`${style.key}\n${character.name}|${character.look}\n${scene}`)
+    .digest("hex");
 }
 
-/** Cache key for a panel image: identical style, cast, and scene never pay twice. */
-export function panelCacheKey(scene: string, characters: StoryCharacter[], style: StyleConfig): string {
-  const cast = characters.map((c) => `${c.name}|${c.look}`).join(";");
-  return createHash("sha256").update(`${style.key}\n${cast}\n${scene}`).digest("hex");
+/**
+ * What the model sees for a page, with refs (h1, h2) in place of ids: the author's letters-only
+ * first name, a prompt-safe city, and redacted highlight texts. Also used for grounding checks.
+ */
+export function preparePage(input: { weekLabel: string; author: PageAuthor; highlights: PageHighlight[] }): {
+  check: PageCheckInput;
+  idOf: Map<string, string>;
+} {
+  const { highlights } = input;
+  if (highlights.length < 1 || highlights.length > PAGE_AI_LIMITS.highlights) {
+    throw new Error("writePage: highlights out of range");
+  }
+  if (new Set(highlights.map((h) => h.id)).size !== highlights.length) {
+    throw new Error("writePage: duplicate highlights");
+  }
+  const city = input.author.city ? toPromptSafe(redactPersonalData(input.author.city).text, 60) : "";
+  const check: PageCheckInput = {
+    weekLabel: cleanText(input.weekLabel, "single-line").slice(0, 40),
+    name: firstNameOf(input.author.name) || "Friend",
+    city: city || null,
+    highlights: highlights.map((h, i) => {
+      const text = cleanText(h.text, "multiline");
+      if (!text || codePointLength(text) > TEXT_LIMITS.highlight) throw new Error("writePage: invalid text");
+      return {
+        ref: `h${i + 1}`,
+        text: redactPersonalData(text).text,
+        serious: h.serious,
+        inComic: h.inComic && !h.serious,
+      };
+    }),
+  };
+  return { check, idOf: new Map(highlights.map((h, i) => [`h${i + 1}`, h.id])) };
+}
+
+function resolveStory(st: RefStory, idOf: Map<string, string>): PageStory {
+  return {
+    highlightId: idOf.get(st.highlightRef)!,
+    section: st.section,
+    headline: st.headline,
+    body: st.body,
+  };
+}
+
+function resolvePage(p: RefPage, idOf: Map<string, string>): PageDraft {
+  return {
+    stories: p.stories.map((st) => resolveStory(st, idOf)),
+    comic: p.comic && {
+      title: p.comic.title,
+      panels: p.comic.panels.map((panel) => ({
+        scene: panel.scene,
+        caption: panel.caption,
+        dialogue: panel.dialogue,
+        highlightId: idOf.get(panel.momentRef)!,
+      })),
+    },
+  };
 }
 
 type Op = "text" | "image" | "moderation";
@@ -231,66 +281,31 @@ export function createAiService(deps: AiServiceDeps): AiService {
     throw new AiError("generation_failed");
   }
 
-  function prepareStory(input: Parameters<AiService["writeStory"]>[0]) {
-    const { people, highlights } = input;
-    if (people.length < 1 || people.length > STORY_LIMITS.people)
-      throw new Error("writeStory: people out of range");
-    if (highlights.length < 1 || highlights.length > STORY_LIMITS.highlights) {
-      throw new Error("writeStory: highlights out of range");
+  /** Asks for JSON, validates it, moderates it; one retry. Returns undefined if nothing passed. */
+  async function generateJson<T>(
+    task: "page" | "story",
+    req: { system: string; user: string; jsonSchema: Record<string, unknown>; maxOutputTokens: number },
+    validate: (raw: unknown) => { ok: true; value: T } | { ok: false; reason: RejectReason },
+    textOf: (value: T) => string,
+    ctx: AiCallContext,
+  ): Promise<T | undefined> {
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      const { raw } = await call("text", task, attempt, ctx, (pctx) =>
+        provider.completeJson({ task, ...req }, pctx),
+      );
+      const checked = validate(raw);
+      if (!checked.ok) {
+        rejected(ctx, task, attempt, checked.reason);
+        continue;
+      }
+      const moderation = await moderateText(textOf(checked.value), ctx);
+      if (moderation.decision === "block") {
+        rejected(ctx, task, attempt, "moderation");
+        return undefined;
+      }
+      return checked.value;
     }
-    if (new Set(people.map((p) => p.userId)).size !== people.length)
-      throw new Error("writeStory: duplicate people");
-    if (new Set(highlights.map((h) => h.id)).size !== highlights.length) {
-      throw new Error("writeStory: duplicate highlights");
-    }
-    const names = promptNames(people.map((p) => p.name));
-    const personRef = new Map(people.map((p, i) => [p.userId, `p${i + 1}`]));
-    const check: StoryCheckInput = {
-      weekLabel: cleanText(input.weekLabel, "single-line").slice(0, 40),
-      people: people.map((p, i) => ({ ref: `p${i + 1}`, name: names[i]! })),
-      highlights: highlights.map((h, i) => {
-        const ref = personRef.get(h.userId);
-        const text = cleanText(h.text, "multiline");
-        if (!ref) throw new Error("writeStory: highlight author is not in people");
-        if (!text || codePointLength(text) > TEXT_LIMITS.highlight)
-          throw new Error("writeStory: invalid text");
-        return {
-          ref: `h${i + 1}`,
-          personRef: ref,
-          text: redactPersonalData(text).text,
-          serious: h.serious,
-          inComic: h.inComic,
-        };
-      }),
-    };
-    const userIdOf = new Map(people.map((p, i) => [`p${i + 1}`, p.userId]));
-    const highlightIdOf = new Map(highlights.map((h, i) => [`h${i + 1}`, h.id]));
-    const nameOf = new Map(check.people.map((p) => [p.ref, p.name]));
-
-    const resolve = (s: RefStory): Story => ({
-      article: {
-        headline: s.article.headline,
-        bylineUserId: userIdOf.get(s.article.bylineRef)!,
-        byline: nameOf.get(s.article.bylineRef)!,
-        body: s.article.body,
-      },
-      comic: s.comic && {
-        title: s.comic.title,
-        panels: s.comic.panels.map((p) => ({
-          scene: p.scene,
-          caption: p.caption,
-          dialogue: p.dialogue.map((d) => ({
-            speakerUserId: userIdOf.get(d.speakerRef)!,
-            speaker: nameOf.get(d.speakerRef)!,
-            text: d.text,
-            side: d.side,
-          })),
-          characterUserIds: p.characterRefs.map((r) => userIdOf.get(r)!),
-          highlightIds: p.momentRefs.map((r) => highlightIdOf.get(r)!),
-        })),
-      },
-    });
-    return { check, resolve };
+    return undefined;
   }
 
   return {
@@ -336,59 +351,72 @@ export function createAiService(deps: AiServiceDeps): AiService {
       return image("avatar", buildAvatarImagePrompt(input.look, input.style), references, input.style, ctx);
     },
 
-    async writeStory(input, ctx) {
-      const { check, resolve } = prepareStory(input);
+    async checkEdit(input, ctx) {
+      const text = cleanText(input.text, "multiline");
+      if (!text) return;
+      const moderation = await moderateText(redactPersonalData(text).text, ctx);
+      if (moderation.decision === "block") throw blocked(moderation, input.field);
+    },
+
+    async writePage(input, ctx) {
+      const { check, idOf } = preparePage(input);
       await quota("text", ctx);
+      const page = await generateJson(
+        "page",
+        {
+          system: PAGE_SYSTEM_PROMPT,
+          user: buildPageUserPrompt({ ...check, boundary: boundary() }),
+          jsonSchema: PAGE_JSON_SCHEMA,
+          maxOutputTokens: 2_000,
+        },
+        (raw) => checkPageOutput(raw, check),
+        pageText,
+        ctx,
+      );
+      return { ...resolvePage(page ?? fallbackPage(check), idOf), usedFallback: !page };
+    },
 
-      const user = buildStoryUserPrompt({ ...check, boundary: boundary() });
-      let story: RefStory | undefined;
-      for (let attempt = 1; attempt <= 2 && !story; attempt++) {
-        const { raw } = await call("text", "story", attempt, ctx, (pctx) =>
-          provider.completeJson(
-            {
-              task: "story",
-              system: STORY_SYSTEM_PROMPT,
-              user,
-              jsonSchema: STORY_JSON_SCHEMA,
-              maxOutputTokens: 2_000,
-            },
-            pctx,
-          ),
-        );
-        const checked = checkStoryOutput(raw, check);
-        if (!checked.ok) {
-          rejected(ctx, "story", attempt, checked.reason);
-          continue;
-        }
-        const moderation = await moderateText(storyText(checked.value), ctx);
-        if (moderation.decision === "block") {
-          rejected(ctx, "story", attempt, "moderation");
-          break;
-        }
-        story = checked.value;
-      }
-
-      return { ...resolve(story ?? fallbackStory(check)), usedFallback: !story };
+    async rewriteStory(input, ctx) {
+      const { check, idOf } = preparePage({ ...input, highlights: [input.highlight] });
+      const previous = input.previousHeadline
+        ? toPromptSafe(input.previousHeadline, PAGE_AI_LIMITS.headline)
+        : undefined;
+      await quota("text", ctx);
+      const story = await generateJson(
+        "story",
+        {
+          system: STORY_SYSTEM_PROMPT,
+          user: buildStoryUserPrompt({ ...check, previousHeadline: previous, boundary: boundary() }),
+          jsonSchema: STORY_JSON_SCHEMA,
+          maxOutputTokens: 500,
+        },
+        (raw) => checkStoryOutput(raw, check),
+        (st) => `${st.headline}\n${st.body}`,
+        ctx,
+      );
+      const chosen = story ?? fallbackStoryFor(check, "h1");
+      return { story: resolveStory(chosen, idOf), usedFallback: !story };
     },
 
     async generatePanel(input, ctx) {
       const scene = cleanText(input.scene, "single-line");
-      const { characters } = input;
-      if (!scene || codePointLength(scene) > STORY_LIMITS.scene) throw new AiError("generation_failed");
-      if (characters.length < 1 || characters.length > STORY_LIMITS.charactersPerPanel) {
-        throw new AiError("generation_failed");
-      }
-      if (characters.some((c) => c.avatar && !isValidImage(c.avatar))) throw new AiError("generation_failed");
+      const { character } = input;
+      if (!scene || codePointLength(scene) > PAGE_AI_LIMITS.scene) throw new AiError("generation_failed");
+      if (!character.look.trim()) throw new AiError("generation_failed");
+      if (character.avatar && !isValidImage(character.avatar)) throw new AiError("generation_failed");
 
       const moderation = await moderateText(scene, ctx);
       if (moderation.decision === "block") throw new AiError("content_blocked", { field: "panel" });
       await quota("image", ctx);
 
-      const references = characters.flatMap((c) => (c.avatar ? [c.avatar] : []));
       return image(
         "panel",
-        buildPanelImagePrompt(scene, characters, input.style),
-        references,
+        buildPanelImagePrompt(
+          scene,
+          { ...character, name: firstNameOf(character.name) || "Friend" },
+          input.style,
+        ),
+        character.avatar ? [character.avatar] : [],
         input.style,
         ctx,
       );

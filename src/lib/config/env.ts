@@ -72,7 +72,7 @@ export const envSchema = z
     // Retention.
     RETENTION_WINDOW_DAYS: int(30, 1, 365),
     RETENTION_LOGOUT_GRACE_HOURS: int(24, 0, 24 * 30),
-    RETENTION_PUBLISHED_DAYS: int(30, 1, 365),
+    RETENTION_PUBLISHED_DAYS: int(14, 1, 365),
     SELFIE_MAX_AGE_MINUTES: int(60, 1, 24 * 60),
 
     // Storage.

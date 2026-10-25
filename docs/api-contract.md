@@ -1,7 +1,6 @@
 # Meanwhile API contract
 
-Version 0.4.0 (Phase 3). This is the contract the web app builds against. It follows the comic pipeline
-handoff (`/api/story`, `/api/avatar`, `/api/panel`, bare JSON responses, `{ "error": "message" }`).
+Version 0.5.0 (Phase 3). This is the contract the web app (`WeeklyFunnies-frontend`) builds against.
 
 - **Source of truth:** the Zod schemas in `src/lib/contract/`. `docs/openapi.yaml` is generated from them
   (`pnpm openapi`), and a test fails if it drifts. Use the OpenAPI file to generate client types.
@@ -58,16 +57,16 @@ carries `X-Request-Id`.
 | ---------------------- | ---- | ------------------------------------------------------------------------- |
 | `bad_request`          | 400  | Validation failed: unknown field, wrong type, bad length, unknown id      |
 | `unauthorized`         | 401  | Missing, expired, revoked, or invalid token                               |
-| `forbidden`            | 403  | Signed in and a member, but not allowed (e.g. non-owner generating)       |
+| `forbidden`            | 403  | Signed in and a member, but not allowed (e.g. non-owner publishing)       |
 | `not_found`            | 404  | Doesn't exist **or** you can't see it (we never reveal which)             |
 | `method_not_allowed`   | 405  | Wrong HTTP method for this path (`Allow` header lists valid ones)         |
-| `conflict`             | 409  | Conflicts with current state (e.g. 4th highlight, stale panel echo)       |
-| `edition_locked`       | 409  | Edition is published; edits are blocked                                   |
+| `conflict`             | 409  | Conflicts with current state (e.g. 4th highlight, panel being drawn)      |
+| `edition_locked`       | 409  | The deadline has passed; the page can't change                            |
 | `payload_too_large`    | 413  | Body or file over the limit                                               |
 | `unsupported_media`    | 415  | Wrong content type or file type                                           |
 | `content_blocked`      | 422  | Moderation blocked the text or photo. Show the message; let the user edit |
 | `rate_limited`         | 429  | Too many requests; wait `retryAfterSeconds`                               |
-| `quota_exceeded`       | 429  | Daily or per-edition generation cap reached                               |
+| `quota_exceeded`       | 429  | Daily or per-page generation cap reached                                  |
 | `internal`             | 500  | Unexpected server error                                                   |
 | `not_implemented`      | 501  | Route exists but its phase isn't built yet                                |
 | `provider_unavailable` | 503  | AI provider is down, timed out, or the circuit breaker is open; retry     |
@@ -80,14 +79,14 @@ whenever you see `self_harm_support`. Other blocks use issue `content_blocked`.
 
 - **Strict input.** Unknown fields, unknown query parameters, and bodies on routes that take none are all
   rejected with `bad_request`.
-- **Ids from the client are never trusted.** Any `editionId`, person id, or highlight id is checked against
-  the database (membership, then ownership). The handoff's echo fields (`people`, `highlights`, `panel`,
-  `person.look`) are optional; if sent, their ids must match, and the server always uses its stored data.
+- **Ids from the client are never trusted.** Every paper, edition, page, story, highlight and photo id is
+  checked against the database (auth, then membership, then ownership).
 - **Ids** are UUIDs. **Timestamps** are ISO 8601 with offset. **Dates** are `YYYY-MM-DD`.
 - **Text cleaning.** All text input is normalized to NFC, stripped of control and invisible characters
   (ZWJ and ZWNJ are kept for emoji and scripts), whitespace is normalized, and the result is trimmed.
   Lengths count Unicode code points **after** cleaning. Responses return the cleaned value.
 - **Render all text as plain text**, including headlines, captions, dialogue and names. Never as HTML.
+  Headlines come in sentence case; style them with CSS if you want Title Case or capitals.
 - **Signed URLs** expire (default 10 minutes). Refetch after `urlsExpireAt`; don't persist URLs. Storage
   paths are never exposed.
 
@@ -95,10 +94,11 @@ whenever you see `self_harm_support`. Other blocks use issue `content_blocked`.
 | ----------------------------- | --------------------------- |
 | Person name, paper name       | 1 to 60 code points         |
 | Highlight text                | 1 to 500 code points        |
-| Highlights per person         | 1 to 3 per edition          |
+| Highlights per page           | 1 to 3                      |
 | Photos per highlight          | up to 4                     |
+| Papers per page               | 1 to 10                     |
 | People per paper              | up to 8                     |
-| Headline / title / body edits | 120 / 80 / 1,500            |
+| Headline / title / story edit | 120 / 80 / 600              |
 | Caption / dialogue line       | 15 words / 12 words         |
 | Avatar trait note             | 1 to 80 code points         |
 | City search query             | 2 to 80 code points         |
@@ -115,190 +115,215 @@ whenever you see `self_harm_support`. Other blocks use issue `content_blocked`.
 ### Rate limits and caps
 
 Per IP and per user (default 120 and 60 requests per minute), plus tighter per-route limits on generation,
-uploads and joining. Generation also has per-user daily caps and per-edition regeneration caps
-(`quota_exceeded`).
+uploads and joining. Joining is also limited per IP (20 a minute), so many accounts can't share one
+machine to guess codes. Generation has per-user daily caps and per-page caps (`quota_exceeded`):
+5 regenerations, 10 story rewrites and 12 panel redraws per page.
+
+## The model in one paragraph
+
+Each person writes **one page per week**. A page has up to 3 highlights; generating it writes **one story
+per highlight** (section, headline, body) and **one 4-panel comic strip starring only that person**, in the
+person's own **style** (`classic`, `manga`, `sketch`, `superhero`). The person picks which of their papers
+the page goes to; the same page appears in each one. A paper's **edition** for the week is the set of
+approved pages from its members. Editions close at the **deadline**, Sunday 11:59 p.m. in the paper owner's
+timezone, and the owner then **publishes**. Published editions are back issues for 14 days unless the
+owner saves them.
 
 ## Endpoints
 
-| Method | Path                                       | Purpose                                          | Phase |
-| ------ | ------------------------------------------ | ------------------------------------------------ | ----- |
-| GET    | `/api/health`                              | Liveness (no auth)                               | 0     |
-| GET    | `/api/me`                                  | Caller's profile                                 | 2     |
-| PATCH  | `/api/me`                                  | Set name, city, birthday (onboarding)            | 2     |
-| GET    | `/api/geocode?q=`                          | City candidates for onboarding                   | 2     |
-| GET    | `/api/papers`                              | My papers                                        | 2     |
-| POST   | `/api/papers`                              | Create a paper with a style (caller is owner)    | 2     |
-| GET    | `/api/papers/{paperId}`                    | Paper and contributor list                       | 2     |
-| PATCH  | `/api/papers/{paperId}`                    | Rename or change style (owner)                   | 2     |
-| GET    | `/api/papers/{paperId}/invites`            | List invites (owner; no codes)                   | 2     |
-| POST   | `/api/papers/{paperId}/invites`            | Create invite code (owner)                       | 2     |
-| DELETE | `/api/papers/{paperId}/invites/{inviteId}` | Revoke invite (owner)                            | 2     |
-| POST   | `/api/invites/join`                        | Join by code                                     | 2     |
-| GET    | `/api/avatar`                              | My look, traits, and avatars per style           | 4     |
-| POST   | `/api/avatar/photo`                        | Upload my photo (consent) for my avatar          | 4     |
-| POST   | `/api/avatar`                              | Generate my avatar in a style (waits)            | 4     |
-| GET    | `/api/papers/{paperId}/editions`           | Editions list                                    | 4     |
-| GET    | `/api/papers/{paperId}/editions/current`   | This week's draft (get or create)                | 4     |
-| GET    | `/api/editions/{editionId}`                | **Edition bundle**                               | 4     |
-| POST   | `/api/highlights`                          | Add a highlight (moderated)                      | 4     |
-| GET    | `/api/highlights/{highlightId}`            | My highlight                                     | 4     |
-| PATCH  | `/api/highlights/{highlightId}`            | Edit, toggle serious/inComic, approve            | 4     |
-| DELETE | `/api/highlights/{highlightId}`            | Delete my highlight                              | 4     |
-| POST   | `/api/highlights/{highlightId}/photos`     | Attach a photo                                   | 4     |
-| DELETE | `/api/photos/{photoId}`                    | Delete my photo (any time)                       | 4     |
-| PUT    | `/api/editions/{editionId}/order`          | Reorder my highlights                            | 4     |
-| POST   | `/api/story`                               | Write the group article + 4-panel script (owner) | 4     |
-| GET    | `/api/story?editionId=`                    | Read the stored story                            | 4     |
-| PATCH  | `/api/story`                               | Edit headline, body, captions, dialogue (owner)  | 4     |
-| POST   | `/api/panel`                               | Draw one panel (owner; waits for the image)      | 4     |
-| POST   | `/api/editions/{editionId}/publish`        | Publish (owner)                                  | 4     |
-| POST   | `/api/session/logout`                      | Sign out everywhere; schedule purge              | 6     |
-| GET    | `/api/internal/jobs`                       | Cron only                                        | 4     |
-| GET    | `/api/internal/cleanup`                    | Cron only                                        | 6     |
+| Method | Path                                                   | Purpose                                    | Phase |
+| ------ | ------------------------------------------------------ | ------------------------------------------ | ----- |
+| GET    | `/api/health`                                          | Liveness (no auth)                         | 0     |
+| GET    | `/api/me`                                              | Caller's profile                           | 2     |
+| PATCH  | `/api/me`                                              | Set name, city, birthday, style            | 2     |
+| GET    | `/api/geocode?q=`                                      | City candidates for onboarding             | 2     |
+| GET    | `/api/weather?lat=&lon=`                               | Weather for the reader                     | 5     |
+| GET    | `/api/papers`                                          | My papers                                  | 2     |
+| POST   | `/api/papers`                                          | Create a paper (caller is owner)           | 2     |
+| GET    | `/api/papers/{paperId}`                                | Paper and contributor list                 | 2     |
+| PATCH  | `/api/papers/{paperId}`                                | Rename (owner)                             | 2     |
+| GET    | `/api/papers/{paperId}/invites`                        | List invites (owner; no codes)             | 2     |
+| POST   | `/api/papers/{paperId}/invites`                        | Create invite code (owner)                 | 2     |
+| DELETE | `/api/papers/{paperId}/invites/{inviteId}`             | Revoke invite (owner)                      | 2     |
+| POST   | `/api/invites/join`                                    | Join by code                               | 2     |
+| GET    | `/api/avatar`                                          | My style, look, traits and avatar          | 4     |
+| POST   | `/api/avatar/photo`                                    | Upload my photo (consent) for my avatar    | 4     |
+| POST   | `/api/avatar`                                          | Generate my avatar in my style (waits)     | 4     |
+| GET    | `/api/pages/current`                                   | My page for this week (or null)            | 4     |
+| PUT    | `/api/pages/current`                                   | Pick papers; creates the page              | 4     |
+| GET    | `/api/pages/{pageId}`                                  | One of my pages                            | 4     |
+| PATCH  | `/api/pages/{pageId}`                                  | Edit stories, comic title, captions, lines | 4     |
+| POST   | `/api/pages/{pageId}/highlights`                       | Add a highlight (moderated)                | 4     |
+| PUT    | `/api/pages/{pageId}/highlights/order`                 | Reorder highlights                         | 4     |
+| POST   | `/api/pages/{pageId}/generate`                         | Write stories and the comic script         | 4     |
+| POST   | `/api/pages/{pageId}/stories/{storyId}/rewrite`        | Rewrite one story                          | 4     |
+| POST   | `/api/pages/{pageId}/panels/{index}`                   | Draw (or redraw) one panel; waits          | 4     |
+| PUT    | `/api/pages/{pageId}/panels/order`                     | Reorder panels                             | 4     |
+| POST   | `/api/pages/{pageId}/approve`                          | Approve for every linked paper             | 4     |
+| GET    | `/api/highlights/{highlightId}`                        | One of my highlights                       | 4     |
+| PATCH  | `/api/highlights/{highlightId}`                        | Edit, toggle serious or inComic            | 4     |
+| DELETE | `/api/highlights/{highlightId}`                        | Delete a highlight                         | 4     |
+| POST   | `/api/highlights/{highlightId}/photos`                 | Attach a photo                             | 4     |
+| DELETE | `/api/photos/{photoId}`                                | Delete my photo (any time)                 | 4     |
+| GET    | `/api/papers/{paperId}/editions`                       | This week's draft and back issues          | 4     |
+| GET    | `/api/papers/{paperId}/editions/current`               | This week's edition (get or create)        | 4     |
+| GET    | `/api/editions/{editionId}`                            | **Edition bundle**                         | 4     |
+| POST   | `/api/editions/{editionId}/publish`                    | Publish after the deadline (owner)         | 4     |
+| PUT    | `/api/editions/{editionId}/saved`                      | Keep forever, or undo (owner)              | 4     |
+| PUT    | `/api/editions/{editionId}/stories/{storyId}/reaction` | React to a story                           | 4     |
+| POST   | `/api/session/logout`                                  | Sign out everywhere; schedule purge        | 6     |
+| GET    | `/api/internal/jobs`                                   | Cron only                                  | 4     |
+| GET    | `/api/internal/cleanup`                                | Cron only                                  | 6     |
 
 Full schemas are in `docs/openapi.yaml`. Key flows:
 
-### Client call order (from the handoff)
+### Client call order
 
-1. The owner picks the paper's style (`POST /api/papers` or `PATCH /api/papers/{paperId}` with `style`:
-   `classic`, `manga`, `sketch`, or `superhero`).
-2. Each person creates their avatar in that style with `POST /api/avatar`.
-3. Each person adds 1 to 3 highlights (`POST /api/highlights`) and approves them.
-4. The owner calls `POST /api/story`, then fires one `POST /api/panel` per panel (indexes 0 to 3) in
-   parallel and renders each panel as its image comes back.
-5. The client overlays captions and dialogue bubbles from the story JSON. Images never contain text.
-6. The owner publishes. Page loads only read stored results (`GET /api/editions/{editionId}`).
+1. Onboarding: `PATCH /api/me` with name, `cityId` (from `/api/geocode`), birthday and `style`.
+2. Avatar: optionally `POST /api/avatar/photo`, then `POST /api/avatar` with the trait form.
+3. `PUT /api/pages/current` with the papers to post to. This returns the page.
+4. Add 1 to 3 highlights with `POST /api/pages/{pageId}/highlights`, and photos to each.
+5. `POST /api/pages/{pageId}/generate`. Then fire `POST /api/pages/{pageId}/panels/{0..3}` in parallel and
+   render each panel as its image comes back. Overlay captions and dialogue from the page JSON; images
+   never contain text.
+6. Optional: edit text (`PATCH`), rewrite a story, redraw a panel, reorder panels.
+7. `POST /api/pages/{pageId}/approve`. The page appears in every linked paper's edition.
+8. After the deadline the owner publishes. Readers load `GET /api/editions/{editionId}`, which only reads
+   stored results.
 
 ### Profile and onboarding
 
-`PATCH /api/me` takes any of `{ "name", "cityId", "birthday" }`. `cityId` comes from
+`PATCH /api/me` takes any of `{ "name", "cityId", "birthday", "style" }`. `cityId` comes from
 `GET /api/geocode?q=Kumasi`; the server re-resolves it, so coordinates and timezone are never trusted from
-the client, and coordinates are never returned. Other members only ever see the month and day of a
-birthday. `Profile.onboarded` is true once name, city, birthday, and an avatar exist.
+the client, and coordinates are never returned. `style` is the person's comic style and defaults to
+`classic`. Other members only ever see the month and day of a birthday, never the year or age.
+`Profile.onboarded` is true once name, city, birthday, and an avatar in the current style exist.
 
 ### Avatars
 
 - `POST /api/avatar/photo` (multipart `photo`, `photoConsent: "true"`) → `201 { photoUrl, expiresAt }`.
   Optional. The photo is moderated, stripped of metadata, used only for the caller's own avatar, and
-  deleted within an hour.
-- `POST /api/avatar` with `{ "style", "person": { "id", "traits"? }, "photoUrl"? }` →
-  `200 { avatarUrl, style, look }`.
-  - `person.id` must be the caller (`forbidden` otherwise).
+  deleted within an hour. The app must ask for consent before uploading.
+- `POST /api/avatar` with `{ "style"?, "traits"?, "photoUrl"? }` → `200 { avatarUrl, style, look }`.
+  - `style` defaults to the profile's style; sending one also changes the profile's style.
   - `traits` is the trait form (`hairStyle`, `hairColor`, `skinTone`, `facialHair`, `glasses`,
     `headwear`, `top`, `topColor`, optional `note`). The server turns it into a fixed **look** text, for
     example "curly dark brown hair, round glasses, green hoodie", stores it, and reuses it word for word
     in every panel. Without `traits`, the stored look is used (`conflict` if there is none).
   - `photoUrl` must be one returned by `/api/avatar/photo` for this user. The server never fetches URLs.
-  - The avatar is saved for that style (one per style) and is also the self preview. Calling again
-    regenerates it, within the caps.
+  - Calling again regenerates the avatar, within the caps.
 
 ### Papers and invites
 
-- A paper has a `style`. Users can be in several papers. Papers hold at most **8** people.
-- `POST /api/papers/{paperId}/invites` returns `code` **once** (`XXXX-XXXX-XXXX`, 12 Crockford base32
-  characters). Only a hash is stored. Codes are multi-use, valid for 7 days, and revocable; at most 5 are
+- Users can be in several papers. Papers hold at most **8** people. Papers have no style; each person has
+  their own.
+- `POST /api/papers/{paperId}/invites` returns `code` **once**: 6 Crockford base32 characters, such as
+  `7KX2QM`. Only a hash is stored. Codes are multi-use, valid for 7 days, and revocable; at most 5 are
   active per paper.
-- `POST /api/invites/join` with `{ "code" }` ignores case, spaces and dashes. Unknown, expired and revoked
-  codes all return the same `not_found`. A full paper returns `conflict`. Guessing is rate-limited.
+- `POST /api/invites/join` with `{ "code" }` ignores case, spaces and dashes, and reads `O` as `0` and
+  `I` or `L` as `1`. Unknown, expired and revoked codes all return the same `not_found`. A full paper
+  returns `conflict`. Guessing is rate-limited per user and per IP.
+
+### Pages
+
+`PUT /api/pages/current` with `{ "paperIds": [...] }` (1 to 10 papers you belong to, each with an open
+edition) creates this week's page if needed and links it to those papers. Calling it again changes the
+list. `GET /api/pages/current` returns `{ page: null }` until then.
+
+The page carries `deadline` (the **earliest** deadline among its papers, so one page never has two
+lock times), `locked`, `papers` (each with its own edition and deadline), `status` (`writing`,
+`generated`, `approved`), `highlights`, `stories`, `comic`, `notices`, and `limits`
+(`regenerationsLeft`, `rewritesLeft`, `redrawsLeft`). After the deadline every write returns
+`edition_locked`, except photo deletion.
 
 ### Highlights
 
-`POST /api/highlights` with `{ "editionId", "text", "serious": false }` → `201 { highlight }`. Nothing is
-generated yet; the text is moderated.
+`POST /api/pages/{pageId}/highlights` with `{ "text", "serious"?: false, "inComic"?: true }` →
+`201 { highlight }`. Nothing is generated yet; the text is moderated.
 
 - Blocked text returns `422 content_blocked` and nothing is saved.
 - A sensitive topic (loss, illness, breakup, job loss) turns `serious` on and `inComic` off, with notice
-  `marked_serious`. Serious highlights can appear gently in the article but never in the comic.
-- Only **approved** highlights go into the story. More than 3 per person returns `conflict`.
+  `marked_serious`. Serious highlights get a gentle story but never appear in the comic.
+- More than 3 per page returns `conflict`. Editing or deleting a highlight marks the page `stale` and
+  clears approval.
 
-### Story: `POST /api/story` (owner only)
+### Generating: `POST /api/pages/{pageId}/generate`
 
-Request: `{ "editionId", "people"?, "highlights"?, "regenerate"?: false }`. `people` (`{ id, name?, look? }`)
-and `highlights` (`{ personId, id?, text? }`) are optional echoes from the handoff; ids must belong to the
-edition, and the stored members and approved highlights are always what's used.
+Request `{ "regenerate"?: false }` → `200 { page }`. Writes one story per highlight, in order, and a
+4-panel comic script in the person's style. Panel images start as `pending`.
 
-Response (the handoff schema plus server fields):
+- Each story has a `section` (`news`, `sports`, `pets`, `campus`, `work`, `food`, `travel`, `arts`,
+  `family`, `home`, `outdoors`, `milestones`), a `headline` and a 1 to 3 sentence `body`.
+- `comic` is null when no highlight may go in the comic. Each panel has a `caption`, up to 2 dialogue
+  lines (`{ text, side }`, spoken by the author), the `highlightId` it shows, its `photos`, and `image`
+  (`{ status, url, error }`).
+- If the model's output fails validation twice, safe default text built from the person's own words is
+  stored with notice `fallback_used`. Edit it or regenerate.
+- The stored page is returned as is unless `regenerate` is true.
 
-```json
-{
-  "editionId": "…",
-  "article": { "headline": "…", "byline": "Ama", "bylineUserId": "…", "body": "Para 1\n\nPara 2\n\nPara 3" },
-  "comic": {
-    "title": "…",
-    "panels": [
-      {
-        "index": 0,
-        "scene": "…",
-        "caption": "…",
-        "dialogue": [{ "speaker": "Ama", "speakerUserId": "…", "text": "…", "side": "left" }],
-        "characters": ["<userId>"],
-        "sources": ["<highlightId>"],
-        "imageUrl": null,
-        "image": { "status": "pending", "url": null, "error": null },
-        "photos": ["<signed url>"]
-      }
-    ]
-  },
-  "notices": [],
-  "regenerationsLeft": 4,
-  "generatedAt": "…"
-}
-```
+### Editing, rewriting and redrawing
 
-- `comic` is null when no approved highlight may go in the comic (all serious).
-- `sources` are the highlights each panel shows; `photos` are their attached photos (show the
-  `PhotoCount` badge when nonzero).
-- If the model's output fails validation twice, a safe default story built from everyone's own words is
-  stored, with notice `fallback_used`. Edit it or regenerate.
-- `stale` means approved highlights changed after generation; regenerate before publishing.
-- `GET /api/story?editionId=` returns the stored story. Drafts: owner only. Published: every member.
-- `PATCH /api/story` with `{ "editionId", "headline"?, "body"?, "title"?, "panels"? }` edits text
-  (moderated). Panel edits change captions and dialogue text only.
+- `PATCH /api/pages/{pageId}` with `{ "stories"?: [{ id, headline?, body? }], "comic"?: { title?, panels?:
+[{ index, caption?, dialogue?: [{ text }] }] } }` edits text. Edits are moderated and clear approval.
+- `POST /api/pages/{pageId}/stories/{storyId}/rewrite` → `200 { story }` writes a clearly different story
+  for that highlight.
+- `POST /api/pages/{pageId}/panels/{index}` with `{ "regenerate"?: false }` → `200 { panel }`. Waits for the
+  image (up to about 60 seconds). A ready panel is returned as is unless `regenerate` is true. Identical
+  style, look and scene are cached and never paid for twice. A panel already being drawn returns
+  `conflict`. On failure show a placeholder with a retry button.
+- `PUT /api/pages/{pageId}/panels/order` with `{ "order": [2, 0, 1, 3] }` reorders panels (a permutation of
+  0 to 3; `order[i]` is the old index of the panel now at `i`).
 
-### Panels: `POST /api/panel` (owner only)
+### Approving
 
-Request: `{ "editionId", "index", "style"?, "panel"?, "people"?, "regenerate"?: false }` →
-`200 { imageUrl, editionId, index, status: "ready" }`.
-
-- The server draws the **stored** panel `index`. If `style` is sent it must equal the paper's style; if
-  `panel` is sent, its `scene` and `characters` must match the stored panel (`conflict` otherwise).
-- The request waits for the image (up to about 60 seconds). Fire all four in parallel.
-- A ready panel is returned as is unless `regenerate` is true. Identical style, cast, and scene are cached
-  and never paid for twice. A panel already being drawn by another request returns `conflict`.
-- Each panel's status (`pending`, `generating`, `ready`, `failed`) is stored, so a reload shows the right
-  state. On failure show a clean placeholder with a retry button; one bad panel never breaks the paper.
+`POST /api/pages/{pageId}/approve` → `200 { page }`. Needs generated content that isn't `stale` and no
+panel still generating. The approved page is what every linked paper shows. Any later edit returns the
+page to `generated`; approve again before the deadline.
 
 ### Photos
 
 `POST /api/highlights/{highlightId}/photos` (multipart `photo`) → `201 { photo }`, up to 4 per highlight,
-drafts only. `DELETE /api/photos/{photoId}` works at any time, including after publishing.
+before the deadline. `DELETE /api/photos/{photoId}` works at any time, including after publishing.
 
-### Edition bundle: `GET /api/editions/{editionId}`
+### Editions and the bundle
 
-Everything the page needs, with short-lived signed URLs: `edition` (with `paperName` and `style`),
-`viewer`, `members` (name, city, zodiac sign, avatar in the paper's style, role), `myHighlights`,
-`progress` (each member's status, no content), `story` (owner only in drafts; everyone once published),
-`weather` (the reader's own city), `horoscopes`, `birthdays` (month and day only), and `urlsExpireAt`.
+- `GET /api/papers/{paperId}/editions` lists this week's draft and the back issues, newest first, with
+  `issueNumber`, `deadline`, `status`, `publishedAt`, `expiresAt` and `savedAt`.
+- `GET /api/editions/{editionId}` returns everything the paper needs, with short-lived signed URLs:
+  `edition` (with `paperName`), `viewer`, `members` (name, city, zodiac sign, style, avatar, role),
+  `progress` (each member's page status, no content), `pages` (published editions only: each author's
+  stories with reactions, and comic), `horoscopes` (one per sign present, with a `luckyNumber` 1 to 99
+  computed by the server, the same for everyone with that sign that week), `birthdays` (month and day
+  only), and `urlsExpireAt`.
+- **Drafts are private.** Before publishing, members see only progress, never anyone else's page.
 
-- **Drafts are private.** Members see their own highlights and everyone's progress status, never other
-  members' text. Row-level security enforces the same rule.
-- Weeks run Monday to Sunday in the paper owner's timezone.
+### Publishing, saving and reactions
 
-### Publishing
+- `POST /api/editions/{editionId}/publish` is owner only and only after the deadline. Every approved page
+  goes in; failed panels publish as placeholders.
+- `PUT /api/editions/{editionId}/saved` with `{ "saved": true }` keeps a published edition forever, for
+  every member. Owner only. `false` restores the 14-day expiry, counted from publishing.
+- `PUT /api/editions/{editionId}/stories/{storyId}/reaction` with `{ "reaction": "ha" | "aww" | "hooray" |
+null }` → `{ reactions: { ha, aww, hooray }, myReaction }`. One reaction per member per story; counts
+  are per edition.
 
-`POST /api/editions/{editionId}/publish` is owner only. It requires a story that isn't `stale` and no
-panel still generating; failed panels publish as placeholders. After publishing, edits return
-`edition_locked`, except photo deletion.
+### Weather: `GET /api/weather`
+
+Send `lat` and `lon` from the browser's location (rounded to 2 decimals is fine), or neither to use the
+profile city. The server rounds coordinates to about 10 km, never stores or logs them, and asks Open-Meteo
+for current conditions and up to 7 days. Returns `{ weather: { source, place, timezone, fetchedAt,
+current, days } }`, or `{ weather: null }` without location or city. The browser never calls a weather
+service directly.
 
 ### Logout and retention
 
 Call `POST /api/session/logout` **before** clearing the local Supabase session. It signs out everywhere.
 
-- **Draft posts** (highlights, story, panels, photos in unpublished editions) are hidden immediately and
-  deleted after 24 hours unless the user signs back in.
-- **Posts in a published edition** are deleted 30 days after that edition was published.
+- **Draft posts** (pages, highlights, stories, panels, photos before publishing) are hidden immediately
+  and deleted after 24 hours unless the user signs back in.
+- **Published editions** are deleted 14 days after publishing, unless the owner saved them.
 - While signed in, activity keeps draft posts alive on a 30-day sliding window.
-- The profile, look and avatars are kept. Avatar photos are deleted within an hour.
+- The profile, look and avatar are kept. Avatar photos are deleted within an hour.
 
 ## AI layer (server-side only, for reference)
 
@@ -310,14 +335,13 @@ that knows a vendor, selected by `AI_PROVIDER=stub|real`. Moderation is a separa
 interface AiService {
   checkHighlight(i: { text }, ctx): Promise<{ serious: boolean; moderation }>;
   checkPhoto(i: { image }, ctx): Promise<void>;
+  checkEdit(i: { text; field }, ctx): Promise<void>;
   describeLook(i: { traits }, ctx): Promise<{ look: string }>;
   generateAvatar(i: { look; photo?; style: StyleConfig }, ctx): Promise<ImageBytes>;
-  writeStory(
-    i: { weekLabel; people: { userId; name }[]; highlights: StoryHighlight[] },
-    ctx,
-  ): Promise<Story & { usedFallback }>;
+  writePage(i: { weekLabel; author: { userId; name; city? }; highlights }, ctx): Promise<PageResult>;
+  rewriteStory(i: { weekLabel; author; highlight; previousHeadline? }, ctx): Promise<{ story; usedFallback }>;
   generatePanel(
-    i: { scene; characters: { name; look; avatar? }[]; style: StyleConfig },
+    i: { scene; character: { name; look; avatar? }; style: StyleConfig },
     ctx,
   ): Promise<ImageBytes>;
   generateHoroscope(i: { sign; weekStart }, ctx): Promise<string>;
@@ -325,7 +349,7 @@ interface AiService {
 
 interface AiProvider {
   completeJson(
-    req: { task: "story" | "horoscope"; system; user; jsonSchema; maxOutputTokens },
+    req: { task: "page" | "story" | "horoscope"; system; user; jsonSchema; maxOutputTokens },
     ctx,
   ): Promise<{ raw; meta }>;
   generateImage(
@@ -335,23 +359,23 @@ interface AiProvider {
 }
 ```
 
-What `writeStory` does:
+What `writePage` does:
 
-1. Cleans each highlight and redacts emails, links and phone numbers. Names become letters-only first names
-   (duplicates get an initial). People and highlights are sent as short refs (`p1`, `h1`), never real ids.
-2. Builds the handoff's story prompt: a fixed system prompt, and each name and highlight inside delimiters
+1. Cleans each highlight and redacts emails, links and phone numbers (the city too). The name becomes a
+   letters-only first name. Highlights are sent as short refs (`h1`), never real ids.
+2. Builds the prompt: a fixed system prompt, then the name, city and each highlight inside delimiters
    with a random per-call id, marked `comic: yes/no` and `tone: light/serious`.
-3. Validates the output: strict schema (code fences stripped), byline is a provided name, 3 to 5
-   paragraphs, exactly 4 panels, at most 2 lines of 12 words, captions of 15 words, scenes without quoted
-   text, characters and speakers from the list, moments from comic-eligible highlights, plain text with no
-   links or markup, and grounding (no names or numbers that aren't in the highlights). One retry.
-4. Moderates the generated text. If validation fails twice or the output is blocked, returns a safe default
-   story built from everyone's own words with neutral scenes, and sets `usedFallback`.
+3. Validates the output: strict schema (code fences stripped), one story per highlight in order, known
+   sections, length limits, no exclamation marks in serious stories, exactly 4 panels from comic-eligible
+   highlights, at most 2 lines of 12 words, captions of 15 words, scenes without quoted text, plain text
+   with no links or markup, and grounding (no names or numbers that aren't in the input). One retry.
+4. Moderates the generated text. If validation fails twice or the output is blocked, returns safe default
+   text built from the person's own words with neutral scenes, and sets `usedFallback`.
 
-Images: avatar and panel prompts are the handoff's fixed templates (look, style fragment, "do not draw any
-text", space at the top for bubbles), with every field reduced to safe characters. Avatars use the photo as
-a reference only when one was given; panels use the avatars of the characters in frame. Scenes are
-moderated before any image call. Images are checked by their bytes, with one retry.
+Images: avatar and panel prompts are fixed templates (look, style fragment, "do not draw any text", space
+at the top for bubbles), with every field reduced to safe characters. Avatars use the photo as a reference
+only when one was given; panels use only the author's own avatar. Scenes are moderated before any image
+call. Images are checked by their bytes, with one retry.
 
 Every call has a deadline (`AI_TIMEOUT_MS`), shares a concurrency cap (`AI_MAX_CONCURRENCY`), runs behind a
 circuit breaker (`AI_CIRCUIT_*`), and counts toward per-user daily caps. Moderation failures fail closed.
@@ -359,6 +383,18 @@ Calls are logged as metadata only.
 
 ## Changelog
 
+- **0.5.0 (Phase 3, aligned with the web app):**
+  - Each person writes **one page per week**: one story per highlight (with a `section`) and a 4-panel
+    comic starring only them. This replaces the group story. New `/api/pages/*` routes. `/api/story`,
+    `/api/panel`, `POST /api/highlights` and `PUT /api/editions/{editionId}/order` are gone.
+  - A page can go to several papers; it locks at the earliest deadline (Sunday 11:59 p.m. in each owner's
+    timezone). The owner publishes after the deadline.
+  - Style belongs to the person (`PATCH /api/me` `style`), not the paper. One avatar, in that style.
+    `POST /api/avatar` no longer takes `person`.
+  - Invite codes are 6 characters; `O`, `I` and `L` are read as `0`, `1`, `1`. Joining is limited per IP.
+  - Reactions (`ha`, `aww`, `hooray`), saving editions forever (owner), server-computed lucky numbers, and
+    back issues kept 14 days.
+  - Weather moved out of the bundle into `GET /api/weather` (browser location or profile city).
 - **0.4.0 (Phase 3, aligned with the comic pipeline handoff):**
   - Responses are bare JSON. Errors are `{ error: "message", code, requestId, details?, retryAfterSeconds? }`
     instead of `{ data }` and `{ error: { code, message, … } }`.

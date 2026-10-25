@@ -15,6 +15,6 @@ export const PATCH = defineRoute(routes.updateMe, async ({ user, body }) => {
     city = await getGeocoder().getById(body.cityId);
     if (!city) throw new ApiError("not_found");
   }
-  await updateProfile(user.id, { name: body.name, birthday: body.birthday, city });
+  await updateProfile(user.id, { name: body.name, birthday: body.birthday, style: body.style, city });
   return { data: { profile: await getProfile(user.id) } };
 });

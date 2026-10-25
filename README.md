@@ -16,8 +16,8 @@ the visual design live elsewhere and plug in through the interfaces described be
 | 0     | Scaffold, API contract, request pipeline                                                | Done        | `phase-1`   |
 | 1     | Database schema, private storage buckets, row-level security and storage policies       | Done        | `phase-1`   |
 | 2     | Auth (token verification), profile and geocoding, papers, invites, joining, rate limits | Done        | `phase-2-3` |
-| 3     | AI layer and safety behind the stub provider, aligned with the comic pipeline handoff   | Done        | `phase-2-3` |
-| 4     | Core routes and data: highlights, photos, avatars, story, panels, bundle, publish       | Next        | `phase-4-5` |
+| 3     | AI layer and safety behind the stub provider, aligned with the web app                  | Done        | `phase-2-3` |
+| 4     | Core routes and data: pages, highlights, photos, avatars, panels, editions, reactions   | Next        | `phase-4-5` |
 | 5     | Non-AI content: weather, birthdays, horoscopes                                          | Not started | `phase-4-5` |
 | 6     | Retention: sliding expiry, logout purge, cleanup cron                                   | Not started | `phase-6-7` |
 | 7     | Seed data for the frontend, end-to-end check with the web app, docs                     | Not started | `phase-6-7` |
@@ -29,28 +29,34 @@ built yet return `501 not_implemented`.
 ### What's left, phase by phase
 
 - **Phase 4: core routes and data.**
-  - Database: highlights (from `events`), per-edition stories and panels with image status, avatars per
-    style, and avatar photos, with row-level security and two-user tests.
+  - Database: weekly pages linked to papers, highlights (from `events`), stories and panels with image
+    status, reactions, saved editions, and avatar photos, with row-level security and two-user tests.
   - Uploads: content sniffing, size and dimension limits, re-encoding, EXIF and GPS stripping, photo
     moderation.
-  - Routes: highlights and photos, `POST /api/avatar/photo`, `GET`/`POST /api/avatar`, `/api/story`,
-    `/api/panel` (with the image cache and per-edition caps), current edition and editions list, the
-    edition bundle with signed URLs, reordering, and publishing.
-- **Phase 5: non-AI content.** Weather from Open-Meteo for the reader's city, cached per city per day;
-  the birthdays query for the edition week; weekly horoscopes per sign through the AI layer, with a
-  fallback line.
-- **Phase 6: retention.** The 30-day sliding window, `POST /api/session/logout` (sign out everywhere,
+  - Routes: `/api/pages/*` (papers, highlights, generate, rewrite, panels with the image cache and
+    per-page caps, reorder, approve), photos, `POST /api/avatar/photo`, `GET`/`POST /api/avatar`, editions
+    and back issues, the edition bundle with signed URLs, deadline locks, publishing (owner, after the
+    deadline), saving, and reactions.
+- **Phase 5: non-AI content.** `GET /api/weather` from Open-Meteo (browser location or profile city,
+  coordinates rounded and never stored); the birthdays query for the edition week; weekly horoscopes per
+  sign through the AI layer, with a fallback line and a server-computed lucky number.
+- **Phase 6: retention.** The 30-day sliding window for drafts, deleting published editions after 14 days
+  unless saved, `POST /api/session/logout` (sign out everywhere,
   hide drafts, purge after 24 hours), the cleanup cron that deletes rows and files together, avatar photo
   expiry, and rate-limit pruning. Tests for all of it.
 - **Phase 7: seed data and frontend check.** A re-runnable seed with a few fake friends, placeholder
-  avatars and one published edition; a run-through with the web app (CORS, auth, the story and panel
+  avatars and one published edition; a run-through with the web app (CORS, auth, the page and panel
   flow); docs brought up to date.
-- **Phase 8: real AI providers.** Anthropic for the story and horoscopes, Meta Muse Image (through the
+- **Phase 8: real AI providers.** Anthropic for stories and horoscopes, Meta Muse Image (through the
   AI/ML API gateway) for avatars and panels, behind `AI_PROVIDER=real`; a real moderation provider; live
   smoke tests behind `AI_LIVE_TESTS=1`; spend limits at the providers. Account deletion is deferred until
   an App Store or public launch.
 
 ## Contract notes for the frontend
+
+- **Contract 0.5.0:** each person writes one page per week under `/api/pages/*`, posted to the papers
+  they pick. Style is on the profile. Invite codes are 6 characters. New reactions, saved editions and
+  `GET /api/weather`. See the changelog in `docs/api-contract.md`.
 
 - **Contract 0.3.0:** blocked-content errors now include `details`, with issue `content_blocked` or
   `self_harm_support`. The self-harm case sends a fixed supportive message the app should show with

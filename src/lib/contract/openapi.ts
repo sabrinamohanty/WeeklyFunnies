@@ -2,7 +2,7 @@ import { OpenAPIRegistry, OpenApiGeneratorV31 } from "@asteasolutions/zod-to-ope
 import { ERROR_CODES, errorEnvelopeSchema } from "./errors";
 import { type RouteContract, routes } from "./routes";
 
-export const API_VERSION = "0.4.0";
+export const API_VERSION = "0.5.0";
 
 export function buildOpenApiDocument() {
   const registry = new OpenAPIRegistry();

@@ -7,8 +7,8 @@ import type { AiProvider, CallContext, ImageBytes, Moderator, ModerationResult }
  * - Text (`completeJson`): Anthropic Messages API, model from AI_REAL_TEXT_MODEL. Send `system` as the
  *   system prompt and `user` as the single user message. Ask for JSON matching `jsonSchema`.
  * - Images (`generateImage`): Meta Muse Image through the AI/ML API gateway (AI_REAL_BASE_URL).
- *   No references: model `meta/muse-image`. With references (the photo for avatars, the characters'
- *   avatars for panels): `meta/muse-image-edit` with them as `image_urls` (1 to 10, base64 is accepted).
+ *   No references: model `meta/muse-image`. With references (the photo for avatars, the person's own
+ *   avatar for panels): `meta/muse-image-edit` with them as `image_urls` (1 to 10, base64 is accepted).
  *   Pass `prompt`, `aspect_ratio` (req.aspectRatio), and `output_format`; read `data[0].b64_json` or
  *   fetch `data[0].url` server-side. Confirm endpoint, auth header, and model ids before going live.
  *

@@ -4,10 +4,10 @@ import { AiError } from "@/lib/ai/errors";
 import { resetConfigCache } from "@/lib/config/env";
 
 const saved = { ...process.env };
-const STORY_INPUT = {
+const PAGE_INPUT = {
   weekLabel: "October 19, 2026",
-  people: [{ userId: "u1", name: "Ama Serwaa" }],
-  highlights: [{ id: "h1", userId: "u1", text: "Baked bread with Kofi", serious: false, inComic: true }],
+  author: { userId: "u1", name: "Ama Serwaa", city: null },
+  highlights: [{ id: "h1", text: "Baked bread with Kofi", serious: false, inComic: true }],
 };
 
 afterEach(() => {
@@ -43,15 +43,15 @@ describe("provider selection by env var", () => {
   it("the unintegrated real provider fails closed as provider_unavailable", async () => {
     useEnv({ AI_PROVIDER: "real", AI_REAL_API_KEY: "k", AI_REAL_TEXT_MODEL: "t", AI_REAL_IMAGE_MODEL: "i" });
     const err = await getAiService()
-      .writeStory(STORY_INPUT, { requestId: "r" })
+      .writePage(PAGE_INPUT, { requestId: "r" })
       .catch((e: unknown) => e);
     expect(err).toBeInstanceOf(AiError);
     expect((err as AiError).code).toBe("provider_unavailable");
   });
 
   it("the default service works end to end on the stub", async () => {
-    const out = await getAiService().writeStory(STORY_INPUT, { requestId: "r", userId: "u" });
+    const out = await getAiService().writePage(PAGE_INPUT, { requestId: "r", userId: "u" });
     expect(out.usedFallback).toBe(false);
-    expect(out.article.byline).toBe("Ama");
+    expect(out.stories[0]!.headline.startsWith("Ama")).toBe(true);
   });
 });
