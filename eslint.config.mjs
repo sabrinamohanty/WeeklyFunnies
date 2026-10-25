@@ -26,14 +26,7 @@ const VENDOR_SDK_PATHS = [
 
 export default tseslint.config(
   {
-    ignores: [
-      ".next/**",
-      "node_modules/**",
-      "coverage/**",
-      "supabase/**",
-      "next-env.d.ts",
-      "WeeklyFunnies-frontend/**",
-    ],
+    ignores: [".next/**", "node_modules/**", "coverage/**", "supabase/**", "next-env.d.ts", "frontend/**"],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,

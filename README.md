@@ -1,9 +1,8 @@
 # Meanwhile backend
 
-The API behind **Meanwhile** ("The Weekly Funnies"), a web app that turns a group of friends' weekly
-highlights into a shared newspaper: one article and one 4-panel comic strip per edition, plus weather,
-horoscopes and birthdays. This repo is the backend only. The web frontend, the real AI model calls, and
-the visual design live elsewhere and plug in through the interfaces described below.
+The API and web app for **Meanwhile** ("The Weekly Funnies"): a weekly newspaper and comic strip for a
+group of friends. The Vite frontend lives in `frontend/`. Real AI model calls plug in through the
+interfaces described below.
 
 - **API contract for the frontend:** [docs/api-contract.md](docs/api-contract.md), plus the generated
   [docs/openapi.yaml](docs/openapi.yaml) for client types.
@@ -64,8 +63,8 @@ built yet return `501 not_implemented`.
 
 ## Stack
 
-- **API:** TypeScript and Next.js 16 route handlers, deployable on Vercel. There are no pages in this repo.
-- **Frontend access:** the web app runs on its own origin. CORS is an exact-origin allowlist
+- **API:** TypeScript and Next.js 16 route handlers, deployable on Vercel.
+- **Frontend:** the Vite app in `frontend/`. CORS is an exact-origin allowlist
   (`CORS_ALLOWED_ORIGINS`), and requests use a bearer token, never cookies.
 - **Database, auth, and storage:** Supabase (Postgres, Auth, and Storage). The web app signs in with
   Supabase Auth directly and sends its access token to this API.
@@ -88,9 +87,10 @@ cp .env.example .env.local      # fill in values; never commit .env files
 pnpm db:start                   # local Supabase; prints the URL and keys for .env.local
 pnpm dev                        # http://localhost:3000
 curl localhost:3000/api/health  # {"status":"ok"}
+cd frontend && npm install && npm run dev   # http://localhost:5173
 ```
 
-To call the API from the web app in local development, run the frontend on its Vite dev port (5173) and set `CORS_ALLOWED_ORIGINS=http://localhost:5173` in `.env.local`.
+The web app reads `frontend/.env.local` (`VITE_API_URL`, `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`). Set `CORS_ALLOWED_ORIGINS=http://localhost:5173` in the API `.env.local`.
 
 ## Checking the database locally
 
@@ -129,6 +129,7 @@ src/lib/ratelimit/  Rate limiter interface and the Postgres implementation.
 supabase/           Local Supabase config and migrations (schema, row-level security, storage).
 tests/              unit/, ai/, integration/, and fixtures/ (shared text and upload cases).
 docs/               API contract and generated OpenAPI.
+frontend/           Vite web app. Talks to this API with a Supabase bearer token.
 ```
 
 ## Adding or changing an endpoint

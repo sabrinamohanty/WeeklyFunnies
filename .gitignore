@@ -24,4 +24,4 @@ coverage/
 .DS_Store
 *.log
 
-WeeklyFunnies-frontend/
+frontend/dist/
