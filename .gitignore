@@ -3,3 +3,7 @@ dist
 .DS_Store
 .env.local
 .env.*.local
+ios/App/App/public
+ios/App/App/capacitor.config.json
+ios/App/build
+ios/DerivedData

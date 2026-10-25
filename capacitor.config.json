@@ -1,0 +1,9 @@
+{
+  "appId": "com.weeklyfunnies.meanwhile",
+  "appName": "Meanwhile",
+  "webDir": "dist",
+  "ios": {
+    "contentInset": "never",
+    "backgroundColor": "#F3EFE4"
+  }
+}
