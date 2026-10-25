@@ -1,0 +1,482 @@
+import type { z } from "zod";
+import { deletedSchema, emptyBody } from "./common";
+import {
+  editionBundleResponseSchema,
+  editionIdParams,
+  editionResponseSchema,
+  editionsResponseSchema,
+  eventIdParams,
+  eventResponseSchema,
+  panelResponseSchema,
+  photoIdParams,
+  photoResponseSchema,
+  photoUploadSchema,
+  createEventRequestSchema,
+  reorderRequestSchema,
+  reorderResponseSchema,
+  requestPanelRequestSchema,
+  updateEventRequestSchema,
+} from "./editions";
+import type { ErrorCode } from "./errors";
+import {
+  createPaperRequestSchema,
+  createdInviteResponseSchema,
+  inviteIdParams,
+  inviteResponseSchema,
+  invitesResponseSchema,
+  joinRequestSchema,
+  paperDetailResponseSchema,
+  paperIdParams,
+  paperResponseSchema,
+  papersResponseSchema,
+  updatePaperRequestSchema,
+} from "./papers";
+import {
+  avatarResponseSchema,
+  avatarUploadSchema,
+  geocodeQuerySchema,
+  geocodeResponseSchema,
+  profileResponseSchema,
+  regenerateAvatarRequestSchema,
+  updateProfileRequestSchema,
+} from "./profile";
+import { cronResultSchema, healthResponseSchema, logoutResponseSchema } from "./session";
+
+export type HttpMethod = "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
+export type AuthMode = "none" | "user" | "cron";
+
+export interface RouteContract {
+  method: HttpMethod;
+  /** OpenAPI-style path, e.g. /api/papers/{paperId}. */
+  path: string;
+  summary: string;
+  tag: string;
+  auth: AuthMode;
+  phase: number;
+  params?: z.ZodObject;
+  query?: z.ZodObject;
+  body?:
+    | { kind: "json"; schema: z.ZodType; maxBytes?: number }
+    | { kind: "multipart"; schema: z.ZodObject; maxBytes: number };
+  success: { status: 200 | 201 | 202; schema: z.ZodType; description?: string };
+  errors: ErrorCode[];
+  rateLimit?: { perUserPerMinute: number };
+}
+
+const AUTHED: ErrorCode[] = ["unauthorized", "rate_limited", "internal"];
+const UPLOAD_MAX_BYTES = 12 * 1024 * 1024 + 64 * 1024;
+
+const route = <T extends RouteContract>(r: T) => r;
+
+export const routes = {
+  health: route({
+    method: "GET",
+    path: "/api/health",
+    summary: "Liveness check.",
+    tag: "system",
+    auth: "none",
+    phase: 0,
+    success: { status: 200, schema: healthResponseSchema },
+    errors: ["internal"],
+  }),
+
+  // ---------- Profile and onboarding ----------
+  getMe: route({
+    method: "GET",
+    path: "/api/me",
+    summary: "Get the caller's profile.",
+    tag: "profile",
+    auth: "user",
+    phase: 2,
+    success: { status: 200, schema: profileResponseSchema },
+    errors: AUTHED,
+  }),
+  updateMe: route({
+    method: "PATCH",
+    path: "/api/me",
+    summary: "Create or update profile fields during onboarding. City is resolved server-side from cityId.",
+    tag: "profile",
+    auth: "user",
+    phase: 2,
+    body: { kind: "json", schema: updateProfileRequestSchema },
+    success: { status: 200, schema: profileResponseSchema },
+    errors: ["bad_request", "not_found", ...AUTHED],
+  }),
+  geocode: route({
+    method: "GET",
+    path: "/api/geocode",
+    summary: "Search for a city. The user picks one and sends its id as cityId.",
+    tag: "profile",
+    auth: "user",
+    phase: 2,
+    query: geocodeQuerySchema,
+    success: { status: 200, schema: geocodeResponseSchema },
+    errors: ["bad_request", "provider_unavailable", ...AUTHED],
+    rateLimit: { perUserPerMinute: 20 },
+  }),
+
+  // ---------- Avatar ----------
+  getAvatar: route({
+    method: "GET",
+    path: "/api/avatar",
+    summary: "Get the approved avatar and any in-progress draft. Poll while draft.status is generating.",
+    tag: "avatar",
+    auth: "user",
+    phase: 4,
+    success: { status: 200, schema: avatarResponseSchema },
+    errors: AUTHED,
+  }),
+  uploadSelfie: route({
+    method: "POST",
+    path: "/api/avatar",
+    summary: "Upload a selfie and start avatar generation. Returns immediately.",
+    tag: "avatar",
+    auth: "user",
+    phase: 4,
+    body: { kind: "multipart", schema: avatarUploadSchema, maxBytes: UPLOAD_MAX_BYTES },
+    success: { status: 202, schema: avatarResponseSchema },
+    errors: [
+      "bad_request",
+      "payload_too_large",
+      "unsupported_media",
+      "quota_exceeded",
+      "provider_unavailable",
+      ...AUTHED,
+    ],
+    rateLimit: { perUserPerMinute: 5 },
+  }),
+  regenerateAvatar: route({
+    method: "POST",
+    path: "/api/avatar/regenerate",
+    summary: "Regenerate the draft avatar from the retained selfie, optionally with tweaks.",
+    tag: "avatar",
+    auth: "user",
+    phase: 4,
+    body: { kind: "json", schema: regenerateAvatarRequestSchema },
+    success: { status: 202, schema: avatarResponseSchema },
+    errors: [
+      "bad_request",
+      "conflict",
+      "content_blocked",
+      "quota_exceeded",
+      "provider_unavailable",
+      ...AUTHED,
+    ],
+    rateLimit: { perUserPerMinute: 5 },
+  }),
+  approveAvatar: route({
+    method: "POST",
+    path: "/api/avatar/approve",
+    summary: "Approve the ready draft avatar. Deletes the selfie.",
+    tag: "avatar",
+    auth: "user",
+    phase: 4,
+    body: { kind: "json", schema: emptyBody },
+    success: { status: 200, schema: avatarResponseSchema },
+    errors: ["conflict", ...AUTHED],
+  }),
+
+  // ---------- Papers ----------
+  listPapers: route({
+    method: "GET",
+    path: "/api/papers",
+    summary: "List papers the caller belongs to.",
+    tag: "papers",
+    auth: "user",
+    phase: 2,
+    success: { status: 200, schema: papersResponseSchema },
+    errors: AUTHED,
+  }),
+  createPaper: route({
+    method: "POST",
+    path: "/api/papers",
+    summary: "Create a paper. The caller becomes its owner.",
+    tag: "papers",
+    auth: "user",
+    phase: 2,
+    body: { kind: "json", schema: createPaperRequestSchema },
+    success: { status: 201, schema: paperResponseSchema },
+    errors: ["bad_request", ...AUTHED],
+    rateLimit: { perUserPerMinute: 5 },
+  }),
+  getPaper: route({
+    method: "GET",
+    path: "/api/papers/{paperId}",
+    summary: "Get a paper and its contributor list.",
+    tag: "papers",
+    auth: "user",
+    phase: 2,
+    params: paperIdParams,
+    success: { status: 200, schema: paperDetailResponseSchema },
+    errors: ["bad_request", "not_found", ...AUTHED],
+  }),
+  updatePaper: route({
+    method: "PATCH",
+    path: "/api/papers/{paperId}",
+    summary: "Rename a paper. Owner only.",
+    tag: "papers",
+    auth: "user",
+    phase: 2,
+    params: paperIdParams,
+    body: { kind: "json", schema: updatePaperRequestSchema },
+    success: { status: 200, schema: paperResponseSchema },
+    errors: ["bad_request", "forbidden", "not_found", ...AUTHED],
+  }),
+
+  // ---------- Invites ----------
+  listInvites: route({
+    method: "GET",
+    path: "/api/papers/{paperId}/invites",
+    summary: "List invites. Owner only. Codes are never returned after creation.",
+    tag: "invites",
+    auth: "user",
+    phase: 2,
+    params: paperIdParams,
+    success: { status: 200, schema: invitesResponseSchema },
+    errors: ["forbidden", "not_found", ...AUTHED],
+  }),
+  createInvite: route({
+    method: "POST",
+    path: "/api/papers/{paperId}/invites",
+    summary: "Create a multi-use invite code valid for 7 days. Owner only. At most 5 active at once.",
+    tag: "invites",
+    auth: "user",
+    phase: 2,
+    params: paperIdParams,
+    body: { kind: "json", schema: emptyBody },
+    success: { status: 201, schema: createdInviteResponseSchema },
+    errors: ["forbidden", "not_found", "conflict", ...AUTHED],
+    rateLimit: { perUserPerMinute: 10 },
+  }),
+  revokeInvite: route({
+    method: "DELETE",
+    path: "/api/papers/{paperId}/invites/{inviteId}",
+    summary: "Revoke an invite. Owner only. Idempotent.",
+    tag: "invites",
+    auth: "user",
+    phase: 2,
+    params: inviteIdParams,
+    success: { status: 200, schema: inviteResponseSchema },
+    errors: ["forbidden", "not_found", ...AUTHED],
+  }),
+  joinPaper: route({
+    method: "POST",
+    path: "/api/invites/join",
+    summary: "Join a paper with an invite code. Joining a paper you're already in returns it.",
+    tag: "invites",
+    auth: "user",
+    phase: 2,
+    body: { kind: "json", schema: joinRequestSchema },
+    success: { status: 200, schema: paperResponseSchema },
+    errors: ["bad_request", "not_found", "conflict", ...AUTHED],
+    rateLimit: { perUserPerMinute: 5 },
+  }),
+
+  // ---------- Editions ----------
+  listEditions: route({
+    method: "GET",
+    path: "/api/papers/{paperId}/editions",
+    summary: "List a paper's published editions and current draft, newest first.",
+    tag: "editions",
+    auth: "user",
+    phase: 4,
+    params: paperIdParams,
+    success: { status: 200, schema: editionsResponseSchema },
+    errors: ["not_found", ...AUTHED],
+  }),
+  currentEdition: route({
+    method: "GET",
+    path: "/api/papers/{paperId}/editions/current",
+    summary: "Get this week's draft edition, creating it if needed.",
+    tag: "editions",
+    auth: "user",
+    phase: 4,
+    params: paperIdParams,
+    success: { status: 200, schema: editionResponseSchema },
+    errors: ["not_found", ...AUTHED],
+  }),
+  getEditionBundle: route({
+    method: "GET",
+    path: "/api/editions/{editionId}",
+    summary: "Everything the app needs to render an edition, with short-lived signed image URLs.",
+    tag: "editions",
+    auth: "user",
+    phase: 4,
+    params: editionIdParams,
+    success: { status: 200, schema: editionBundleResponseSchema },
+    errors: ["bad_request", "not_found", ...AUTHED],
+  }),
+  publishEdition: route({
+    method: "POST",
+    path: "/api/editions/{editionId}/publish",
+    summary: "Publish the edition with approved strips only. Owner only. Blocks further edits.",
+    tag: "editions",
+    auth: "user",
+    phase: 4,
+    params: editionIdParams,
+    body: { kind: "json", schema: emptyBody },
+    success: { status: 200, schema: editionResponseSchema },
+    errors: ["bad_request", "forbidden", "not_found", "conflict", "edition_locked", ...AUTHED],
+  }),
+  reorderEvents: route({
+    method: "PUT",
+    path: "/api/editions/{editionId}/order",
+    summary: "Reorder the caller's own events in a draft edition.",
+    tag: "events",
+    auth: "user",
+    phase: 4,
+    params: editionIdParams,
+    body: { kind: "json", schema: reorderRequestSchema },
+    success: { status: 200, schema: reorderResponseSchema },
+    errors: ["bad_request", "not_found", "edition_locked", ...AUTHED],
+  }),
+
+  // ---------- Events ----------
+  createEvent: route({
+    method: "POST",
+    path: "/api/events",
+    summary: "Add a highlight. Generates headline, article, and panel description (text only, synchronous).",
+    tag: "events",
+    auth: "user",
+    phase: 4,
+    body: { kind: "json", schema: createEventRequestSchema, maxBytes: 16 * 1024 },
+    success: { status: 201, schema: eventResponseSchema },
+    errors: [
+      "bad_request",
+      "not_found",
+      "conflict",
+      "edition_locked",
+      "content_blocked",
+      "quota_exceeded",
+      "provider_unavailable",
+      ...AUTHED,
+    ],
+    rateLimit: { perUserPerMinute: 10 },
+  }),
+  getEvent: route({
+    method: "GET",
+    path: "/api/events/{eventId}",
+    summary: "Get one of the caller's events. Use to poll panel.status.",
+    tag: "events",
+    auth: "user",
+    phase: 4,
+    params: eventIdParams,
+    success: { status: 200, schema: eventResponseSchema },
+    errors: ["bad_request", "not_found", ...AUTHED],
+  }),
+  updateEvent: route({
+    method: "PATCH",
+    path: "/api/events/{eventId}",
+    summary: "Edit headline or article, toggle serious or inComic, or approve.",
+    tag: "events",
+    auth: "user",
+    phase: 4,
+    params: eventIdParams,
+    body: { kind: "json", schema: updateEventRequestSchema, maxBytes: 16 * 1024 },
+    success: { status: 200, schema: eventResponseSchema },
+    errors: ["bad_request", "not_found", "edition_locked", "content_blocked", ...AUTHED],
+  }),
+  deleteEvent: route({
+    method: "DELETE",
+    path: "/api/events/{eventId}",
+    summary: "Delete one of the caller's events, its panel, and its photos. Draft editions only.",
+    tag: "events",
+    auth: "user",
+    phase: 4,
+    params: eventIdParams,
+    success: { status: 200, schema: deletedSchema },
+    errors: ["bad_request", "not_found", "edition_locked", ...AUTHED],
+  }),
+  requestPanel: route({
+    method: "POST",
+    path: "/api/events/{eventId}/panel",
+    summary: "Start panel generation and return immediately. Idempotent while generating.",
+    tag: "events",
+    auth: "user",
+    phase: 4,
+    params: eventIdParams,
+    body: { kind: "json", schema: requestPanelRequestSchema },
+    success: { status: 202, schema: panelResponseSchema },
+    errors: [
+      "bad_request",
+      "not_found",
+      "edition_locked",
+      "content_blocked",
+      "quota_exceeded",
+      "provider_unavailable",
+      ...AUTHED,
+    ],
+    rateLimit: { perUserPerMinute: 10 },
+  }),
+
+  // ---------- Photos ----------
+  addPhoto: route({
+    method: "POST",
+    path: "/api/events/{eventId}/photos",
+    summary: "Attach a photo to one of the caller's events. Draft editions only.",
+    tag: "photos",
+    auth: "user",
+    phase: 4,
+    params: eventIdParams,
+    body: { kind: "multipart", schema: photoUploadSchema, maxBytes: UPLOAD_MAX_BYTES },
+    success: { status: 201, schema: photoResponseSchema },
+    errors: [
+      "bad_request",
+      "not_found",
+      "conflict",
+      "edition_locked",
+      "payload_too_large",
+      "unsupported_media",
+      ...AUTHED,
+    ],
+    rateLimit: { perUserPerMinute: 20 },
+  }),
+  deletePhoto: route({
+    method: "DELETE",
+    path: "/api/photos/{photoId}",
+    summary: "Delete one of the caller's photos. Allowed at any time, including after publishing.",
+    tag: "photos",
+    auth: "user",
+    phase: 4,
+    params: photoIdParams,
+    success: { status: 200, schema: deletedSchema },
+    errors: ["bad_request", "not_found", ...AUTHED],
+  }),
+
+  // ---------- Session ----------
+  logout: route({
+    method: "POST",
+    path: "/api/session/logout",
+    summary: "Sign out everywhere and schedule the purge of the caller's draft posts.",
+    tag: "session",
+    auth: "user",
+    phase: 6,
+    body: { kind: "json", schema: emptyBody },
+    success: { status: 200, schema: logoutResponseSchema },
+    errors: AUTHED,
+  }),
+
+  // ---------- Internal (cron only) ----------
+  runJobs: route({
+    method: "GET",
+    path: "/api/internal/jobs",
+    summary: "Cron: claim and run queued generation jobs, and retry stuck ones.",
+    tag: "internal",
+    auth: "cron",
+    phase: 4,
+    success: { status: 200, schema: cronResultSchema },
+    errors: ["unauthorized", "internal"],
+  }),
+  runCleanup: route({
+    method: "GET",
+    path: "/api/internal/cleanup",
+    summary: "Cron: purge expired posts, lapsed sessions, and stale selfies (rows and files).",
+    tag: "internal",
+    auth: "cron",
+    phase: 6,
+    success: { status: 200, schema: cronResultSchema },
+    errors: ["unauthorized", "internal"],
+  }),
+} as const satisfies Record<string, RouteContract>;
+
+export type RouteId = keyof typeof routes;

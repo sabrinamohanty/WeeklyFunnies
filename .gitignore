@@ -1,0 +1,25 @@
+# dependencies
+node_modules/
+
+# build output
+.next/
+out/
+dist/
+next-env.d.ts
+*.tsbuildinfo
+
+# env files: never commit real values
+.env
+.env.*
+!.env.example
+
+# supabase local state
+supabase/.branches/
+supabase/.temp/
+supabase/.env
+
+# test and tooling output
+coverage/
+.vercel/
+.DS_Store
+*.log
