@@ -1,0 +1,8 @@
+contributors.json
+photos/*
+!photos/.gitkeep
+generated/
+comics/**/*.png
+comics/**/*.jpg
+comics/**/*.jpeg
+comics/**/*.webp

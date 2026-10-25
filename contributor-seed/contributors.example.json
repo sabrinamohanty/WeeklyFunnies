@@ -1,0 +1,22 @@
+{
+  "paper": { "id": "crew", "name": "Our Weekly", "pressDay": "Saturday" },
+  "contributors": [
+    {
+      "id": "your-name",
+      "name": "Your Name",
+      "first": "Your",
+      "role": "Editor",
+      "city": "",
+      "birthday": "",
+      "bio": "",
+      "photo": "photos/your-name.jpg",
+      "color": "purple",
+      "sign": "",
+      "login": { "email": "you@example.com" },
+      "highlights": [
+        { "text": "Tried making homemade pizza this week. The kitchen is still covered in flour.", "inComic": true, "serious": false },
+        { "text": "Finished my first 5K with friends cheering at the finish line.", "inComic": true, "serious": false }
+      ]
+    }
+  ]
+}

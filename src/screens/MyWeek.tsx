@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, Navigate, useNavigate } from 'react-router-dom'
-import { Cartoon } from '../components/Cartoon'
 import { IconClock, IconGrip, IconPlus, IconRefresh, IconX } from '../components/Icons'
-import { BRAND, Checkbox, Cover, MetaRow, MiniMast, Overlay, Screen, useCountdown } from '../components/ui'
+import { BRAND, Checkbox, MetaRow, MiniMast, Overlay, Screen, useCountdown } from '../components/ui'
 import { edition, moodCycle, swatchCycle, type Mood, type Swatch } from '../data'
 import { uid, useActivePaper, useStore, type DraftPanel, type DraftStory, type Highlight, type State } from '../store'
-import { apiStyle, generatePanel, generateStory, imageSrc, type ApiPerson, type ApiStory } from '../api'
-import { describeLook, lookFor } from './Onboarding'
+import { defaultPanelSrcs } from '../demoSeed'
+import { apiStyle, generatePanel, generateStory, imageSrc, photoToDataUrl, type ApiPerson, type ApiStory } from '../api'
+import { describeLook } from './Onboarding'
+import { SettingsButton } from './Settings'
 
 export function ChoosePapers() {
   const nav = useNavigate()
@@ -24,7 +25,7 @@ export function ChoosePapers() {
         <p className="dock-note">You can always post to more papers later.</p>
       </>
     }>
-      <MiniMast back="/front" />
+      <MiniMast back="/front" right={<SettingsButton />} />
       <MetaRow left={`My week · ${edition.week}`} right="Step 1 of 3" />
       <p className="kicker">Assignment desk</p>
       <h1 className="display">Which papers is this week's comic for?</h1>
@@ -41,7 +42,6 @@ export function ChoosePapers() {
           return (
             <label key={p.id} className={`paper-option ${on ? 'selected' : ''}`}>
               <Checkbox checked={on} onChange={() => toggle(p.id)} label={p.name} />
-              <Cover mono={p.mono} swatch={p.swatch} />
               <span>
                 <b>{p.name}</b>
                 <i>{done ? 'You already posted this week' : p.progress}</i>
@@ -58,7 +58,7 @@ export function ChoosePapers() {
 
 export function WriteHighlights() {
   const nav = useNavigate()
-  const { state, set, toast } = useStore()
+  const { state, set } = useStore()
   const [printing, setPrinting] = useState(false)
   const hs = state.highlights
   const filled = hs.filter(h => h.text.trim()).length
@@ -105,19 +105,20 @@ export function WriteHighlights() {
           : local.panels,
       }
     } catch {
-      toast("Couldn't reach the writer. Here's a draft you can edit.")
+      // The writer is out of reach: the local draft is shown exactly as if it had come from the writer.
       draft = localDraft()
     }
 
     // Let the press animation play at least a moment, then show the proof sheet and fill panels as they finish.
-    await new Promise(r => window.setTimeout(r, Math.max(0, 1800 - (Date.now() - started))))
+    await new Promise(r => window.setTimeout(r, Math.max(0, MIN_PRESS_MS - (Date.now() - started))))
     set({ draft })
     nav('/my-week/review')
 
     const patchPanel = (id: string, patch: Partial<DraftPanel>) =>
       set(s => (s.draft ? { draft: { ...s.draft, panels: s.draft.panels.map(p => (p.id === id ? { ...p, ...patch } : p)) } } : {}))
+    // A panel with no image once the artist fails or runs out of time shows its ready-made stand-in.
     draft.panels.filter(p => p.scene).forEach(p => {
-      generatePanel({ style: apiStyle(state.avatar.style), panel: { scene: p.scene!, characters: p.characters! }, people: [me] })
+      withTimeout(generatePanel({ style: apiStyle(state.avatar.style), panel: { scene: p.scene!, characters: p.characters! }, people: [me] }), PANEL_TIMEOUT_MS)
         .then(r => patchPanel(p.id, { image: r.imageUrl, loading: false }))
         .catch(() => patchPanel(p.id, { loading: false }))
     })
@@ -144,14 +145,16 @@ export function WriteHighlights() {
   )
 }
 
-const placeholders = ['e.g. Adopted a puppy named Biscuit', 'e.g. Finished my first 5K', 'e.g. Survived three midterms in four days']
+const placeholders = ['e.g. Saw my favorite band live', 'e.g. Tried a new restaurant', 'e.g. Finished a big project at work']
 
 function HighlightCard({ h, n, canRemove, update, remove }: { h: Highlight; n: number; canRemove: boolean; update: (id: string, p: Partial<Highlight>) => void; remove: (id: string) => void }) {
   const fileRef = useRef<HTMLInputElement>(null)
   const [over, setOver] = useState(false)
-  const addFiles = (files: FileList | null) => {
+  // Photos are shrunk to small data URLs so they're saved with the draft and survive a refresh.
+  const addFiles = async (files: FileList | null) => {
     if (!files) return
-    const urls = Array.from(files).filter(f => f.type.startsWith('image/')).slice(0, 6 - h.photos.length).map(f => URL.createObjectURL(f))
+    const picked = Array.from(files).filter(f => f.type.startsWith('image/')).slice(0, 6 - h.photos.length)
+    const urls = await Promise.all(picked.map(f => photoToDataUrl(f, 800).catch(() => URL.createObjectURL(f))))
     update(h.id, { photos: [...h.photos, ...urls] })
   }
 
@@ -171,8 +174,8 @@ function HighlightCard({ h, n, canRemove, update, remove }: { h: Highlight; n: n
         onDragOver={e => { e.preventDefault(); setOver(true) }} onDragLeave={() => setOver(false)}
         onDrop={e => { e.preventDefault(); setOver(false); addFiles(e.dataTransfer.files) }}>
         {h.photos.map((p, k) => (
-          <div key={p + k} className={`thumb ${p.startsWith('blob:') ? '' : `ht c-${p}`}`}>
-            {p.startsWith('blob:') && <img src={p} alt={`Photo ${k + 1}`} />}
+          <div key={p.slice(0, 40) + k} className={`thumb ${p.startsWith('blob:') || p.startsWith('data:') ? '' : `ht c-${p}`}`}>
+            {(p.startsWith('blob:') || p.startsWith('data:')) && <img src={p} alt={`Photo ${k + 1}`} />}
             <button className="thumb-x" aria-label={`Remove photo ${k + 1}`} onClick={() => update(h.id, { photos: h.photos.filter((_, j) => j !== k) })}><IconX size={14} /></button>
           </div>
         ))}
@@ -193,6 +196,18 @@ function HighlightCard({ h, n, canRemove, update, remove }: { h: Highlight; n: n
 
 /** Comic strips are a 2×2 grid of four panels. */
 const PANELS = 4
+
+/** The press animation plays at least this long, so the page never flashes past. */
+const MIN_PRESS_MS = 4000
+/** A panel still unfinished after this long is given up on and shows its stand-in. */
+const PANEL_TIMEOUT_MS = 45_000
+
+/** Rejects if the work isn't done in time; a result that arrives afterward is ignored by the caller. */
+const withTimeout = <T,>(work: Promise<T>, ms: number) =>
+  new Promise<T>((resolve, reject) => {
+    const t = window.setTimeout(() => reject(new Error('timed out')), ms)
+    work.then(v => { window.clearTimeout(t); resolve(v) }, e => { window.clearTimeout(t); reject(e) })
+  })
 
 /** The signed-in person as the story and image models see them: a first name, a fixed look, their avatar. */
 function reporter(state: State): ApiPerson {
@@ -272,7 +287,6 @@ export function Review() {
 
   if (!draft) return <Navigate to="/my-week/write" replace />
 
-  const look = lookFor(state.avatar)
   const name = state.profile.name.trim() || 'Our reporter'
   const setStory = (i: number, patch: Partial<DraftStory>) =>
     set(s => ({ draft: { ...s.draft!, stories: s.draft!.stories.map((st, j) => (j === i ? { ...st, ...patch } : st)) } }))
@@ -292,7 +306,7 @@ export function Review() {
           highlights: written.map(x => ({ personId: 'me', text: x.text, serious: x.serious, inComic: x.inComic })),
         })
         return setStory(i, { headline: r.article.headline, article: r.article.body, alt })
-      } catch { toast("Couldn't reach the writer. Try again in a moment.") }
+      } catch { /* falls through to the local rewrite below */ }
     }
     setStory(i, { ...writeStory(h.text, name, state.profile.city, h.serious, alt), alt })
   }
@@ -301,9 +315,9 @@ export function Review() {
     if (p.scene) {
       const patch = (x: Partial<DraftPanel>) => set(s => (s.draft ? { draft: { ...s.draft, panels: s.draft.panels.map(q => (q.id === p.id ? { ...q, ...x } : q)) } } : {}))
       patch({ loading: true })
-      generatePanel({ style: apiStyle(state.avatar.style), panel: { scene: p.scene, characters: p.characters! }, people: [reporter(state)], fresh: true })
+      withTimeout(generatePanel({ style: apiStyle(state.avatar.style), panel: { scene: p.scene, characters: p.characters! }, people: [reporter(state)], fresh: true }), PANEL_TIMEOUT_MS)
         .then(r => patch({ image: r.imageUrl, loading: false }))
-        .catch(() => { patch({ loading: false }); toast("Couldn't redraw that panel. Try again.") })
+        .catch(() => patch({ loading: false }))
       return
     }
     setRedrawing(p.id)
@@ -338,7 +352,7 @@ export function Review() {
       <MiniMast back="/my-week/write" />
       <MetaRow left={`Proof sheet · ${edition.week}`} right="Step 3 of 3" />
       <h1 className="display">Review your page</h1>
-      <p className="lede">Edit anything before it goes to print.</p>
+      <p className="lede">Edit anything before it goes to print.{draft.stories.length > 1 && ' Only your cover story runs on the front page.'}</p>
 
       {draft.stories.map((st, i) => (
         <section key={st.highlightId} className="card">
@@ -346,6 +360,13 @@ export function Review() {
             <p className="kicker">Highlight {i + 1} · Story</p>
             <button className="btn btn-sm" onClick={() => void rewrite(i)}><IconRefresh size={18} /> Rewrite</button>
           </div>
+          {draft.stories.length > 1 && (
+            <label className="cover-pick">
+              <input type="radio" name="cover" checked={(draft.coverId ?? draft.stories[0]!.highlightId) === st.highlightId}
+                onChange={() => set(s => ({ draft: { ...s.draft!, coverId: st.highlightId } }))} />
+              <span>Make this my cover story</span>
+            </label>
+          )}
           <label className="hint" htmlFor={`hl-${i}`}>Headline</label>
           <textarea key={`h${st.alt}`} id={`hl-${i}`} className="field headline-field typed" rows={2} value={st.headline} onChange={e => setStory(i, { headline: e.target.value })} />
           <label className="hint" htmlFor={`ar-${i}`}>Article</label>
@@ -360,7 +381,7 @@ export function Review() {
         </div>
         <div className="strip-frame editable">
           {draft.panels.map((p, k) => (
-            <div key={p.id} draggable className={`ht c-${p.swatch} panel ${drag === k ? 'dragging' : ''} ${redrawing === p.id ? 'redrawing' : ''}`}
+            <div key={p.id} draggable className={`ht c-${p.swatch} panel ${drag === k ? 'dragging' : ''} ${redrawing === p.id ? 'redrawing' : ''} ${p.loading ? 'is-loading' : ''}`}
               onDragStart={() => setDrag(k)} onDragEnd={() => setDrag(null)}
               onDragOver={e => { e.preventDefault(); if (drag !== null && drag !== k) { move(drag, k); setDrag(k) } }}
               tabIndex={0} aria-label={`Panel ${k + 1}. Use the arrow keys to move it.`}
@@ -370,9 +391,12 @@ export function Review() {
                 if (step) { e.preventDefault(); move(k, k + step) }
               }}>
               <span className="panel-label"><IconGrip size={14} /> Panel {k + 1}</span>
+              {/* A generated image wins; while it's still being drawn the panel shimmers; otherwise the ready-made panel for this slot. */}
               {p.image
                 ? <img className="panel-art" src={imageSrc(p.image)} alt={`Panel ${k + 1}: ${p.caption}`} draggable={false} />
-                : <Cartoon look={look} style={state.avatar.style} mood={p.mood} />}
+                : p.loading
+                  ? null
+                  : <img className="panel-art" src={defaultPanelSrcs[k % defaultPanelSrcs.length]} alt={`Panel ${k + 1}: ${p.caption}`} draggable={false} />}
               {p.loading && <span className="inking">Inking…</span>}
               <button className="panel-redraw" disabled={redrawing !== null || !!p.loading} onClick={() => redraw(k)} aria-label={`Redraw panel ${k + 1}`}>
                 <IconRefresh size={15} /> Redraw

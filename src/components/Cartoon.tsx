@@ -1,5 +1,6 @@
+import { useState } from 'react'
 import type { ArtStyle } from '../store'
-import type { Look, Mood } from '../data'
+import type { Friend, Look, Mood } from '../data'
 
 interface Props {
   look: Look
@@ -61,4 +62,12 @@ function Mouth({ mood }: { mood: Mood }) {
     case 'grin': return <path d="M43 66 Q50 76 57 66 Z" fill={INK} stroke={INK} strokeWidth={2} strokeLinejoin="round" />
     default: return <path d="M44 67 Q50 72.5 56 67" fill="none" stroke={INK} strokeWidth={2.6} strokeLinecap="round" />
   }
+}
+
+/** A friend's face for avatar circles: their photo avatar if it loads, else the cartoon. */
+export function FriendFace({ friend }: { friend: Friend }) {
+  const [broken, setBroken] = useState(false)
+  return friend.avatar && !broken
+    ? <img src={friend.avatar} alt="" onError={() => setBroken(true)} />
+    : <Cartoon look={friend.look} crop="face" />
 }

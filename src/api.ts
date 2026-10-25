@@ -14,8 +14,9 @@ async function post<T>(path: string, body: unknown, timeoutMs = 120_000): Promis
   const r = await fetch(BASE + path, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(timeoutMs),
   })
-  const data = await r.json().catch(() => ({}))
-  if (!r.ok) throw new Error((data as { error?: string }).error ?? `Request failed (${r.status})`)
+  // With no server, the app's own web server can answer with its HTML page and a 200; that isn't a result.
+  const data = await r.json().catch(() => null)
+  if (!r.ok || data == null || typeof data !== 'object') throw new Error((data as { error?: string } | null)?.error ?? `Request failed (${r.status})`)
   return data as T
 }
 

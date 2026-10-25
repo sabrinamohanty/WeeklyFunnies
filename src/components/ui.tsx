@@ -1,22 +1,17 @@
-import { useEffect, useLayoutEffect, useRef, useState, type HTMLAttributes, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type HTMLAttributes, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { NavLink, useLocation, useNavigate } from 'react-router-dom'
-import { READING, capturePage, playTurn } from './pageTurn'
-import { IconBack, IconComics, IconFront, IconMoon, IconPencil, IconStar, IconSunSmall } from './Icons'
+import { IconBack, IconComics, IconFront, IconMoon, IconMyWeek, IconStar, IconSunSmall } from './Icons'
 import { useActivePaper, useIsDark, useStore } from '../store'
 import { demoNow, type Swatch } from '../data'
+
+/** The three reading pages, for swiping and arrow keys. */
+const READING = ['/front', '/comics', '/stars']
 
 export function Screen({ children, tabs, dock, className = '' }: { children: ReactNode; tabs?: boolean; dock?: ReactNode; className?: string }) {
   const main = useRef<HTMLElement>(null)
   const { pathname } = useLocation()
   const nav = useNavigate()
-
-  // Every screen change turns the page: copy this screen as it leaves, turn it away when the next one arrives.
-  useLayoutEffect(() => {
-    playTurn(pathname)
-    const el = main.current
-    return () => capturePage(pathname, el)
-  }, [pathname])
 
   // On the reading pages, swipe or use the arrow keys to turn to the next or previous page.
   useEffect(() => {
@@ -115,7 +110,7 @@ const tabs = [
   { to: '/front', label: 'Front', Icon: IconFront },
   { to: '/comics', label: 'Comics', Icon: IconComics },
   { to: '/stars', label: 'Stars', Icon: IconStar },
-  { to: '/my-week', label: 'My Week', Icon: IconPencil },
+  { to: '/my-week', label: 'My Week', Icon: IconMyWeek },
 ]
 
 export function TabBar() {

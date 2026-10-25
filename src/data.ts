@@ -1,4 +1,5 @@
-// Mock data for the frontend. Everything here would come from the API later.
+// Demo data for the frontend. The crew roster, highlights and comics come from demoSeed.ts.
+import { seedComics, seedHighlights, seedPaper, seedPeople } from './demoSeed'
 
 export type Swatch = 'yellow' | 'blue' | 'purple' | 'green' | 'pink' | 'orange' | 'gray'
 export type Mood = 'o' | 'smile' | 'flat' | 'grin'
@@ -16,22 +17,56 @@ export interface Friend {
   name: string
   first: string
   color: Swatch
+  /** Cartoon stand-in, used when the photo avatar is missing or fails to load. */
   look: Look
   sign: string
+  role: 'Editor' | 'Contributor'
+  city: string
+  /** Month and day only ("MM-DD"). */
+  birthday: string
+  bio: string
+  avatar?: string
 }
 
-export const friends: Record<string, Friend> = {
-  lauren: { id: 'lauren', name: 'Lauren', first: 'Lauren', color: 'pink', sign: 'Aries',
-    look: { skin: '#F0C4A0', hair: '#8A4B2A', shirt: '#E8968A' } },
-  diego: { id: 'diego', name: 'Diego R.', first: 'Diego', color: 'yellow', sign: 'Libra',
-    look: { skin: '#C98A5E', hair: '#2A1D16', shirt: '#E89A3A' } },
-  maya: { id: 'maya', name: 'Maya L.', first: 'Maya', color: 'blue', sign: 'Scorpio',
-    look: { skin: '#F4D0AA', hair: '#B8261F', shirt: '#4A8CC4', hat: true } },
-  priya: { id: 'priya', name: 'Priya S.', first: 'Priya', color: 'green', sign: 'Gemini',
-    look: { skin: '#9A6440', hair: '#1C1916', shirt: '#6FA36F' } },
-  sam: { id: 'sam', name: 'Sam K.', first: 'Sam', color: 'purple', sign: 'Capricorn',
-    look: { skin: '#E0B48C', hair: '#6B5444', shirt: '#9A82C8', glasses: true } },
+export const zodiac: { sign: string; abbr: string; from: [number, number] }[] = [
+  { sign: 'Capricorn', abbr: 'Cp', from: [1, 1] },
+  { sign: 'Aquarius', abbr: 'Aq', from: [1, 20] },
+  { sign: 'Pisces', abbr: 'Pi', from: [2, 19] },
+  { sign: 'Aries', abbr: 'Ar', from: [3, 21] },
+  { sign: 'Taurus', abbr: 'Ta', from: [4, 20] },
+  { sign: 'Gemini', abbr: 'Ge', from: [5, 21] },
+  { sign: 'Cancer', abbr: 'Cn', from: [6, 21] },
+  { sign: 'Leo', abbr: 'Le', from: [7, 23] },
+  { sign: 'Virgo', abbr: 'Vi', from: [8, 23] },
+  { sign: 'Libra', abbr: 'Li', from: [9, 23] },
+  { sign: 'Scorpio', abbr: 'Sc', from: [10, 23] },
+  { sign: 'Sagittarius', abbr: 'Sg', from: [11, 22] },
+  { sign: 'Capricorn', abbr: 'Cp', from: [12, 22] },
+]
+
+/** Accepts "YYYY-MM-DD" or the roster's month/day-only "MM-DD". */
+export function signFor(date: string) {
+  const [m, d] = date.split('-').map(Number).slice(-2)
+  if (!m || !d) return null
+  let found = zodiac[0]
+  for (const z of zodiac) if (m > z.from[0] || (m === z.from[0] && d >= z.from[1])) found = z
+  return found
 }
+
+const fallbackLooks: Record<string, Look> = {
+  lauren: { skin: '#F0C4A0', hair: '#8A4B2A', shirt: '#9A82C8' },
+  esi: { skin: '#9A6440', hair: '#1C1916', shirt: '#4A8CC4' },
+  brianna: { skin: '#E0B48C', hair: '#6B5444', shirt: '#E8968A' },
+}
+const defaultLook: Look = { skin: '#E0B48C', hair: '#2A1D16', shirt: '#6FA36F' }
+
+export const friends: Record<string, Friend> = Object.fromEntries(seedPeople.map(p => [p.id, {
+  id: p.id, name: p.name, first: p.first, color: p.color, look: fallbackLooks[p.id] ?? defaultLook,
+  sign: signFor(p.birthday)?.sign ?? '', role: p.role, city: p.city, birthday: p.birthday, bio: p.bio, avatar: p.avatar,
+} satisfies Friend]))
+
+/** Roster in masthead order: the editor first. */
+export const crew: Friend[] = seedPeople.map(p => friends[p.id]!)
 
 const WEEK_MS = 7 * 86_400_000
 
@@ -64,9 +99,9 @@ function currentEdition(now = new Date()) {
   const monday = mondayOf(now)
   const deadline = addDays(monday, 6)
   deadline.setHours(23, 59, 0, 0)
-  // Papers go to press Saturday morning.
+  // Highlights close Sunday night; papers go to press Monday morning.
   let nextPress = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 9)
-  nextPress = addDays(nextPress, (6 - nextPress.getDay() + 7) % 7)
+  nextPress = addDays(nextPress, (1 - nextPress.getDay() + 7) % 7)
   if (nextPress <= now) nextPress = addDays(nextPress, 7)
 
   return {
@@ -96,61 +131,50 @@ export interface Story {
   headline: string
   author: string
   body: string
-  photos: number
+  /** Real event photo URLs; empty when none were supplied. */
+  photos: string[]
   swatch: Swatch
   caption: string
   reactions: { ha: number; aww: number; hooray: number }
 }
 
-export const stories: Story[] = [
-  { id: 'pup', section: 'Pets', headline: 'Austin Man Adopts First Pup!', author: 'diego',
-    body: 'Diego brought home Biscuit, a nine-week-old lab mix, from the Austin Animal Center on Tuesday. Sources confirm Biscuit has already claimed the couch.',
-    photos: 3, swatch: 'yellow', caption: 'Biscuit at Zilker', reactions: { ha: 4, aww: 11, hooray: 6 } },
-  { id: '5k', section: 'Sports', headline: 'Maya Conquers First 5K, Demands Tacos', author: 'maya',
-    body: 'She finished the Lady Bird Lake loop in 34 minutes and went straight to breakfast tacos. A second race is already on the calendar.',
-    photos: 2, swatch: 'green', caption: 'the finish line', reactions: { ha: 7, aww: 2, hooray: 9 } },
-  { id: 'job', section: 'News', headline: 'Sam Starts New Job at Downtown Design Studio', author: 'sam',
-    body: 'Sam began a new role as a junior designer this Monday. The crew is planning a celebration this weekend.',
-    photos: 1, swatch: 'purple', caption: 'first-day desk', reactions: { ha: 1, aww: 3, hooray: 12 } },
-  { id: 'orgo', section: 'Campus', headline: 'Priya Survives Midterm Week on Cold Brew Alone', author: 'priya',
-    body: 'Three exams in four days, one library carrel, zero regrets. Organic chemistry has been formally notified.',
-    photos: 1, swatch: 'blue', caption: 'the library carrel', reactions: { ha: 10, aww: 4, hooray: 5 } },
-]
+// Headlines and bodies only restate what each contributor supplied; nothing else is invented.
+const storyCopy: Record<string, { section: string; headline: string; body: string; caption: string }> = {
+  'lauren-highlight-1': { section: 'Music', headline: 'Lauren Catches sombr Live, Has So Much Fun', caption: 'All smiles',
+    body: 'Lauren went to the sombr concert on Monday and had so much fun seeing him.' },
+  'lauren-highlight-2': { section: 'Social', headline: 'Lauren Celebrates a Friend’s Engagement', caption: 'Grinning from ear to ear',
+    body: 'Lauren went to a friend’s engagement party on Friday night.' },
+  'esi-highlight-1': { section: 'Sports', headline: 'Esi Hits the Bowling Alley', caption: 'Wow that was good',
+    body: 'Esi went bowling this week.' },
+  'brianna-highlight-1': { section: 'Pets', headline: 'Brianna Adopts First Puppy, Finishes First 5K', caption: 'Feeling accomplished',
+    body: 'Brianna adopted a first puppy, Biscuit, and brought Biscuit home on Tuesday. The pair have spent the week getting to know each other. Brianna also finished a first 5K at Lady Bird Lake and celebrated with delicious tacos.' },
+}
 
-export interface Panel { swatch: Swatch; mood: Mood; photos: number; caption: string }
-export interface Strip { id: string; title: string; author: string; panels: Panel[] }
+export const stories: Story[] = seedHighlights.flatMap(h => {
+  const c = storyCopy[h.id]
+  const p = friends[h.personId]
+  if (!c || !p) return []
+  return [{ id: h.id, author: p.id, swatch: p.color, photos: h.photos, reactions: { ha: 0, aww: 0, hooray: 0 }, ...c }]
+})
 
-export const strips: Strip[] = [
-  { id: 'dog', title: 'Diego Gets a Dog', author: 'diego', panels: [
-    { swatch: 'blue', mood: 'o', photos: 2, caption: '“Wait… they’re ALL adoptable?”' },
-    { swatch: 'yellow', mood: 'grin', photos: 3, caption: '“His name is Biscuit. He is perfect.”' },
-    { swatch: 'purple', mood: 'flat', photos: 1, caption: '3 a.m. “Biscuit, please.”' },
-    { swatch: 'green', mood: 'smile', photos: 2, caption: 'Morning walk. Worth it.' },
-  ] },
-  { id: '5k', title: 'Maya vs. the 5K', author: 'maya', panels: [
-    { swatch: 'green', mood: 'flat', photos: 1, caption: 'Mile one. “This is fine.”' },
-    { swatch: 'yellow', mood: 'grin', photos: 2, caption: 'The finish line appears!' },
-    { swatch: 'pink', mood: 'smile', photos: 1, caption: 'Tacos: earned.' },
-    { swatch: 'blue', mood: 'grin', photos: 1, caption: 'Signing up for the next one.' },
-  ] },
-  { id: 'midterm', title: 'Midterm Week', author: 'priya', panels: [
-    { swatch: 'purple', mood: 'o', photos: 1, caption: 'Three exams. Four days.' },
-    { swatch: 'blue', mood: 'flat', photos: 2, caption: 'Cold brew #6.' },
-    { swatch: 'yellow', mood: 'grin', photos: 1, caption: 'Free at last.' },
-    { swatch: 'pink', mood: 'smile', photos: 1, caption: 'Celebrating with something that is not cold brew.' },
-  ] },
-]
+/** The prepared comics, each one complete image with its owner attached. */
+export const comics = seedComics.flatMap(c => {
+  const author = friends[c.personId]
+  return author ? [{ ...c, author, photos: seedHighlights.filter(h => h.personId === c.personId).flatMap(h => h.photos) }] : []
+})
 
-export const horoscopes = [
-  { sign: 'Scorpio', abbr: 'Sc', friend: 'maya', swatch: 'pink' as Swatch, lucky: 21,
-    text: 'A milestone arrives midweek. Let someone else pick the restaurant, then quietly order the best thing on the menu.' },
-  { sign: 'Libra', abbr: 'Li', friend: 'diego', swatch: 'yellow' as Swatch, lucky: 9,
-    text: 'Balance returns to your home, though not to your sleep schedule. A small creature requires your attention.' },
-  { sign: 'Gemini', abbr: 'Ge', friend: 'priya', swatch: 'blue' as Swatch, lucky: 3,
-    text: 'Your hard work pays off. Celebrate with something that is not cold brew.' },
-  { sign: 'Capricorn', abbr: 'Cp', friend: 'sam', swatch: 'green' as Swatch, lucky: 1,
-    text: 'New beginnings suit you. Bring snacks on day five and you will be remembered fondly.' },
-]
+export interface Birthday { person: Friend; date: Date }
+
+/** Next occurrence of each roster birthday on or after `from` (month/day only; no year is ever shown). */
+export function upcomingBirthdays(from: Date): Birthday[] {
+  const start = new Date(from.getFullYear(), from.getMonth(), from.getDate())
+  return crew.map(person => {
+    const [m, d] = person.birthday.split('-').map(Number)
+    let date = new Date(start.getFullYear(), (m ?? 1) - 1, d ?? 1)
+    if (date < start) date = new Date(start.getFullYear() + 1, (m ?? 1) - 1, d ?? 1)
+    return { person, date }
+  }).sort((a, b) => a.date.getTime() - b.date.getTime())
+}
 
 // Generic readings for the signed-in reader's own sign.
 export const signReadings: Record<string, string> = {
@@ -168,30 +192,6 @@ export const signReadings: Record<string, string> = {
   Pisces: 'A daydream becomes a plan. Write it down before brunch.',
 }
 
-export const zodiac: { sign: string; abbr: string; from: [number, number] }[] = [
-  { sign: 'Capricorn', abbr: 'Cp', from: [1, 1] },
-  { sign: 'Aquarius', abbr: 'Aq', from: [1, 20] },
-  { sign: 'Pisces', abbr: 'Pi', from: [2, 19] },
-  { sign: 'Aries', abbr: 'Ar', from: [3, 21] },
-  { sign: 'Taurus', abbr: 'Ta', from: [4, 20] },
-  { sign: 'Gemini', abbr: 'Ge', from: [5, 21] },
-  { sign: 'Cancer', abbr: 'Cn', from: [6, 21] },
-  { sign: 'Leo', abbr: 'Le', from: [7, 23] },
-  { sign: 'Virgo', abbr: 'Vi', from: [8, 23] },
-  { sign: 'Libra', abbr: 'Li', from: [9, 23] },
-  { sign: 'Scorpio', abbr: 'Sc', from: [10, 23] },
-  { sign: 'Sagittarius', abbr: 'Sg', from: [11, 22] },
-  { sign: 'Capricorn', abbr: 'Cp', from: [12, 22] },
-]
-
-export function signFor(isoDate: string) {
-  const [, m, d] = isoDate.split('-').map(Number)
-  if (!m || !d) return null
-  let found = zodiac[0]
-  for (const z of zodiac) if (m > z.from[0] || (m === z.from[0] && d >= z.from[1])) found = z
-  return found
-}
-
 export interface Paper {
   id: string
   name: string
@@ -206,36 +206,33 @@ export interface Paper {
   pressDay: string
 }
 
+/** Colour of the signed-in test user's avatar, apart from the three presets. */
+export const youColor: Swatch = 'yellow'
+
+// The test user joins as the fourth member; the three presets have already posted.
 export const initialPapers: Paper[] = [
-  { id: 'lc', name: 'The Longhorn Crew', mono: 'LC', swatch: 'yellow', role: 'Contributor', status: 'due',
-    members: ['pink', 'yellow', 'blue', 'green', 'purple'], progress: '4 of 5 friends have posted', pressDay: 'Saturday' },
-  { id: 'fg', name: 'Family Gazette', mono: 'FG', swatch: 'blue', role: 'Editor', status: 'new',
-    members: ['pink', 'yellow', 'blue', 'green', 'purple', 'orange'], size: 8, progress: '2 of 8 have posted', pressDay: 'Sunday' },
-  { id: 'rw', name: 'Roommates Weekly', mono: 'RW', swatch: 'green', role: 'Contributor', status: 'done',
-    members: ['pink', 'yellow', 'blue'], progress: 'You already posted this week', pressDay: 'Saturday' },
+  { id: seedPaper.id, name: seedPaper.name, mono: seedPaper.mono, swatch: 'yellow', role: 'Contributor', status: 'due',
+    members: [...crew.map(p => p.color), youColor], progress: `${seedPeople.length} of ${seedPeople.length + 1} friends have posted`,
+    pressDay: seedPaper.pressDay },
 ]
 
-export const pendingInvite = {
-  from: 'Sam', paper: { id: 'dsg', name: 'Design Studio Gang', mono: 'DS', swatch: 'orange' as Swatch,
-    members: ['purple', 'orange', 'blue', 'pink', 'green', 'yellow'] as Swatch[], pressDay: 'Friday' },
-}
-
 export const findablePapers: Record<string, Omit<Paper, 'role' | 'status' | 'progress'> & { editor: string }> = {
-  BOOKCL: { id: 'bc', name: 'The Book Club Times', mono: 'BC', swatch: 'purple', editor: 'Jordan',
+  // The seeded paper, so a reader who leaves it can join again with a code.
+  SNZ123: { id: seedPaper.id, name: seedPaper.name, mono: seedPaper.mono, swatch: 'yellow', editor: 'Lauren',
+    members: initialPapers[0]!.members, size: initialPapers[0]!.size, pressDay: seedPaper.pressDay },
+  BOOKCL: { id: 'bc', name: 'The Book Club Times', mono: 'BC', swatch: 'purple', editor: 'Demo editor',
     members: ['purple', 'pink', 'blue', 'yellow', 'green', 'orange', 'gray'], pressDay: 'Sunday' },
 }
 
 export interface Issue { no: number; week: string; headline: string; swatch: Swatch; recycleIn: number }
 
+// The Snoozers have one edition so far, so there is no back catalog to invent.
 export const issues: Issue[] = [
-  { no: 43, week: 'Oct 19–25', headline: 'Austin Man Adopts First Pup!', swatch: 'yellow', recycleIn: 14 },
-  { no: 42, week: 'Oct 12–18', headline: 'Priya Declares War on Orgo', swatch: 'blue', recycleIn: 6 },
-  { no: 41, week: 'Oct 5–11', headline: 'Crew Survives ACL, Barely', swatch: 'pink', recycleIn: 1 },
+  { no: edition.no, week: edition.week, headline: stories.find(s => s.id === 'brianna-highlight-1')?.headline ?? 'This Week in The Snoozers',
+    swatch: 'yellow', recycleIn: 14 },
 ]
 
-export const savedIssues: Issue[] = [
-  { no: 36, week: 'Aug 31–Sep 6', headline: 'Diego Learns to Two-Step, Sort Of', swatch: 'green', recycleIn: Infinity },
-]
+export const savedIssues: Issue[] = []
 
 export const swatchCycle: Swatch[] = ['blue', 'yellow', 'purple', 'green', 'pink']
 export const moodCycle: Mood[] = ['o', 'grin', 'smile', 'flat']

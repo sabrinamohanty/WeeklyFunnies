@@ -25,6 +25,12 @@ function toPlace(r: GeoResult): Place {
   return { id: r.id, label: [r.name, r.admin1, r.country].filter(Boolean).join(', '), detail: r.admin2 ?? '' }
 }
 
+/** Cities offered when the online search can't be reached, so picking a city always works. */
+const LOCAL_PLACES: Place[] = [
+  'New York, NY', 'Austin, TX', 'Los Angeles, CA', 'Chicago, IL', 'Houston, TX', 'Dallas, TX', 'San Francisco, CA',
+  'Seattle, WA', 'Boston, MA', 'Miami, FL', 'Atlanta, GA', 'Denver, CO',
+].map((label, i) => ({ id: -1 - i, label, detail: 'United States' }))
+
 /** City search box backed by Open-Meteo's free geocoding API (no key, browser-friendly). */
 export function CityPicker({ id, value, onChange, onPick, autoFocus }: { id: string; value: string; onChange?: (city: string) => void; onPick?: (city: string) => void; autoFocus?: boolean }) {
   const [query, setQuery] = useState(value)
@@ -58,7 +64,11 @@ export function CityPicker({ id, value, onChange, onPick, autoFocus }: { id: str
         setActive(list.length ? 0 : -1)
         setStatus(list.length ? 'idle' : 'empty')
       } catch (e) {
-        if ((e as Error).name !== 'AbortError') setStatus('error')
+        if ((e as Error).name === 'AbortError') return
+        const list = LOCAL_PLACES.filter(p => p.label.toLowerCase().startsWith(q.toLowerCase()))
+        setPlaces(list)
+        setActive(list.length ? 0 : -1)
+        setStatus('idle')
       }
     }, 250)
     return () => { window.clearTimeout(t); ctrl.abort() }

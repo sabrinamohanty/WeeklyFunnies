@@ -2,21 +2,15 @@ import { useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { IconBookmark, IconChevron, IconClock, IconPlus, IconX } from '../components/Icons'
 import { BRAND, Cover, Dots, Halftone, Logo, MiniMast, Overlay, Screen, initials } from '../components/ui'
-import { edition, findablePapers, issues, pendingInvite, savedIssues, swatchCycle, type Issue, type Paper } from '../data'
+import { edition, findablePapers, initialPapers, issues, savedIssues, swatchCycle, type Issue, type Paper } from '../data'
 import { useActivePaper, useStore } from '../store'
 
 const statusTag = { due: 'Due Sun', new: 'New', done: 'Done' } as const
-const statusLine = { due: 'You haven’t posted this week', new: 'New edition ready to read', done: 'You posted 2 highlights' } as const
+const statusLine = { due: 'You haven’t posted this week', new: 'New edition ready to read', done: 'You posted this week' } as const
 
 export function Papers() {
   const nav = useNavigate()
-  const { state, set, toast } = useStore()
-
-  const joinInvite = () => {
-    const p = pendingInvite.paper
-    set(s => ({ inviteHandled: true, activePaper: p.id, papers: [...s.papers, { ...p, role: 'Contributor', status: 'due', progress: '0 of 6 have posted' }] }))
-    toast(`Welcome to ${p.name}!`)
-  }
+  const { state, set } = useStore()
 
   return (
     <Screen dock={<button className="btn btn-primary" onClick={() => nav('/papers/join')}>Join or start a paper</button>}>
@@ -35,7 +29,7 @@ export function Papers() {
                 <span>
                   <b>{p.name}</b>
                   <i>{p.size ?? p.members.length} members · {p.role}</i>
-                  <span>{p.id === 'rw' || status !== 'done' ? statusLine[status] : 'You posted this week'}</span>
+                  <span>{statusLine[status]}</span>
                 </span>
                 <IconChevron />
               </div>
@@ -47,17 +41,6 @@ export function Papers() {
           )
         })}
       </div>
-
-      {!state.inviteHandled && (
-        <section className="invite-card">
-          <p className="kicker">Pending invite</p>
-          <p>{pendingInvite.from} invited you to <b>{pendingInvite.paper.name}</b> ({pendingInvite.paper.members.length} members)</p>
-          <div className="btn-row split">
-            <button className="btn btn-sm" onClick={() => { set({ inviteHandled: true }); toast('Invite declined') }}>Decline</button>
-            <button className="btn btn-sm btn-primary" onClick={joinInvite}>Join</button>
-          </div>
-        </section>
-      )}
 
       <LogOut />
     </Screen>
@@ -83,7 +66,7 @@ export function JoinPaper() {
   const [found, setFound] = useState<(typeof findablePapers)[string] | null>(null)
   const [err, setErr] = useState('')
   const [name, setName] = useState('')
-  const [day, setDay] = useState('Saturday')
+  const [day, setDay] = useState('Monday')
   const [created, setCreated] = useState<string | null>(null)
 
   const find = (e: FormEvent) => {
@@ -91,14 +74,15 @@ export function JoinPaper() {
     const c = code.trim().split('/').pop()!.toUpperCase()
     const hit = findablePapers[c]
     setFound(hit ?? null)
-    setErr(hit ? '' : c.length !== 6 ? 'Codes are 6 letters, like BOOKCL.' : 'No paper with that code. Check with your friend, or try BOOKCL.')
+    setErr(hit ? '' : c.length !== 6 ? 'Codes are 6 characters.' : 'No paper with that code. Check with your friend.')
   }
 
   const join = () => {
     if (!found) return
     if (state.papers.some(p => p.id === found.id)) { toast('You’re already on this paper'); return }
-    const paper: Paper = { ...found, role: 'Contributor', status: 'due', progress: `0 of ${found.members.length} have posted` }
-    set(s => ({ papers: [...s.papers, paper], activePaper: paper.id }))
+    const seeded = initialPapers.find(p => p.id === found.id)
+    const paper: Paper = seeded ?? { ...found, role: 'Contributor', status: 'due', progress: `0 of ${found.members.length} have posted` }
+    set(s => ({ papers: [...s.papers, paper], activePaper: paper.id, selectedPapers: [...new Set([...s.selectedPapers, paper.id])] }))
     toast(`You joined ${found.name}`)
     nav('/papers')
   }
@@ -121,9 +105,9 @@ export function JoinPaper() {
       <p className="kicker">Got an invite?</p>
       <h1 className="display">Join a paper</h1>
       <form onSubmit={find}>
-        <label className="lede block" htmlFor="code">Paste an invite link or 6-letter code</label>
+        <label className="lede block" htmlFor="code">Paste an invite link or 6-character code</label>
         <div className="input-row">
-          <input id="code" className="field code" value={code} placeholder="BOOKCL" autoCapitalize="characters" spellCheck={false}
+          <input id="code" className="field code" value={code} placeholder="ABCDEF" autoCapitalize="characters" spellCheck={false}
             onChange={e => { setCode(e.target.value); setErr('') }} />
           <button className="btn btn-sm" type="submit">Find</button>
         </div>

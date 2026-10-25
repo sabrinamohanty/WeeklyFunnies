@@ -1,10 +1,23 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Cartoon } from '../components/Cartoon'
 import { GoogleMark, IconEye, IconMail } from '../components/Icons'
 import { BRAND, Halftone, Logo, MiniMast, OrRule, Screen } from '../components/ui'
-import { friends, stories } from '../data'
+import { crew } from '../data'
+import { seedPaper } from '../demoSeed'
 import { useStore } from '../store'
+import classicPreview from '../assets/preview/classic.svg'
+import mangaPreview from '../assets/preview/manga.svg'
+import sketchPreview from '../assets/preview/sketch.svg'
+import laurenPortrait from '../assets/lauren.png'
+import heroPreview from '../assets/preview/superhero.svg'
+
+// Generic sample front pages for the welcome animation. Deliberately separate from the seeded paper's stories in data.ts.
+const previewArt = [
+  { src: classicPreview, label: 'Retro', section: 'Pets', headline: 'Local woman excited to get New Cat!' },
+  { src: mangaPreview, label: 'Manga', section: 'Social', headline: 'Jenny Gets Engaged!' },
+  { src: sketchPreview, label: 'Painterly sketch', section: 'Food', headline: 'Sam Day Dreams About Some Great Food' },
+  { src: heroPreview, label: 'Superhero comic', section: 'Sports', headline: 'John Runs First Marathon!' },
+]
 
 export function Welcome() {
   const nav = useNavigate()
@@ -19,8 +32,8 @@ export function Welcome() {
       <PressPreview />
       <p className="pitch">Write a few highlights. Get a newspaper and a comic strip about your whole crew.</p>
       <div className="invite-row">
-        <span className="avatar-circle c-pink"><Cartoon look={friends.lauren!.look} crop="face" /></span>
-        <p>Lauren invited you to <b>The Longhorn Crew</b></p>
+        <span className="avatar-circle c-pink"><img src={laurenPortrait} alt="Lauren" /></span>
+        <p>{crew.find(f => f.role === 'Editor')?.first ?? 'A friend'} invited you to <b>{seedPaper.name}</b></p>
       </div>
       <div className="stack">
         <button className="btn btn-primary" onClick={() => nav('/signup')}>Create account</button>
@@ -34,20 +47,20 @@ export function Welcome() {
 function PressPreview() {
   const [i, setI] = useState(0)
   useEffect(() => {
-    const t = window.setInterval(() => setI(v => (v + 1) % 3), 3200)
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+    const t = window.setInterval(() => setI(v => (v + 1) % previewArt.length), 3200)
     return () => window.clearInterval(t)
   }, [])
-  const story = stories[i]!
-  const friend = friends[story.author]!
+  const art = previewArt[i]!
   return (
     <Halftone swatch="yellow" className="press-preview" aria-label="Preview of a front page">
       <div key={i} className="mini-paper">
         <div className="mini-logo">{BRAND}</div>
         <div className="mini-rule" />
-        <div className="mini-kicker">{story.section}</div>
-        <div className="mini-headline">{story.headline}</div>
+        <div className="mini-kicker">{art.section} · {art.label}</div>
+        <div className="mini-headline">{art.headline}</div>
         <div className="mini-body">
-          <Halftone swatch={story.swatch} className="mini-photo"><Cartoon look={friend.look} mood="grin" /></Halftone>
+          <div className="mini-photo"><img src={art.src} alt={`${art.label} avatar illustration`} /></div>
           <div className="mini-lines"><i /><i /><i /><i /><i style={{ width: '60%' }} /></div>
         </div>
       </div>
@@ -110,7 +123,7 @@ export function SignUp() {
       <MiniMast back="/welcome" />
       <p className="kicker">Join the staff</p>
       <h1 className="display">Create your account</h1>
-      <p className="lede">You'll join <b>The Longhorn Crew</b> right after.</p>
+      <p className="lede">You'll join <b>{seedPaper.name}</b> right after.</p>
       <GoogleButton />
       <OrRule><i>or use email</i></OrRule>
       <form className="form" onSubmit={submit} noValidate>

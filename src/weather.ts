@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { seededForecast } from './weatherSeed'
 
 export type Sky = 'sun' | 'partly' | 'cloud' | 'rain' | 'storm'
 
@@ -84,17 +85,23 @@ type Status = 'loading' | 'ready' | 'no_key' | 'error'
 /** Used when the reader hasn't picked a city or their city's weather can't be loaded. */
 export const DEFAULT_CITY = 'Austin, TX'
 
+/** When the live forecast fails, a stored one (if the city has one) keeps the screen working. */
+function storedOr(city: string, error: { error: 'no_key' | 'error' }) {
+  const stored = seededForecast(city)
+  return stored ? { forecast: stored } : error
+}
+
 async function fetchForecast(city: string): Promise<{ forecast: Forecast } | { error: 'no_key' | 'error' }> {
   const cached = read<{ at: number; forecast: Forecast }>(cacheKey(city))
   if (cached && Date.now() - cached.at < 3_600_000) return { forecast: cached.forecast }
   try {
     const r = await fetch(`/api/weather?city=${encodeURIComponent(city)}`)
     const body = await r.json()
-    if (!r.ok) return { error: body.error === 'no_key' ? 'no_key' : 'error' }
+    if (!r.ok) return storedOr(city, { error: body.error === 'no_key' ? 'no_key' : 'error' })
     write(cacheKey(city), { at: Date.now(), forecast: body })
     return { forecast: body }
   } catch {
-    return { error: 'error' }
+    return storedOr(city, { error: 'error' })
   }
 }
 

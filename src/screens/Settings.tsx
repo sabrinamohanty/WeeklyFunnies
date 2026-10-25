@@ -19,7 +19,6 @@ export function Settings() {
   const nav = useNavigate()
   const { state, set, toast } = useStore()
   const [leaving, setLeaving] = useState<string | null>(null)
-  const onlyOne = state.papers.length <= 1
 
   const leave = (id: string) => {
     const paper = state.papers.find(p => p.id === id)
@@ -81,13 +80,12 @@ export function Settings() {
             ) : (
               <>
                 <span className="leave-name"><b>{p.name}</b><i>{p.size ?? p.members.length} members · {p.role}</i></span>
-                <button className="btn btn-sm" disabled={onlyOne} onClick={() => setLeaving(p.id)}>Leave</button>
+                <button className="btn btn-sm" onClick={() => setLeaving(p.id)}>Leave</button>
               </>
             )}
           </li>
         ))}
       </ul>
-      {onlyOne && <p className="hint">You need to be in at least one paper. Join another before leaving this one.</p>}
 
       <button className="btn settings-logout" onClick={() => { set({ authed: false }); nav('/welcome', { replace: true }) }}>Log out</button>
     </Screen>

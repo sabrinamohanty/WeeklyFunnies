@@ -8,6 +8,7 @@ import { Comics, Front, Stars } from './screens/Read'
 import { ChoosePapers, Review, WriteHighlights } from './screens/MyWeek'
 import { BackIssues, JoinPaper, Papers } from './screens/Papers'
 import { Settings } from './screens/Settings'
+import { RequirePaper } from './components/RequirePaper'
 import './styles.css'
 
 function ScrollToTop() {
@@ -37,15 +38,15 @@ function App() {
           <Route path="/onboarding/profile" element={<Profile />} />
           <Route path="/onboarding/avatar" element={<AvatarStep />} />
           <Route path="/onboarding/joined" element={<Joined />} />
-          <Route path="/front" element={<Front />} />
-          <Route path="/comics" element={<Comics />} />
-          <Route path="/stars" element={<Stars />} />
-          <Route path="/my-week" element={<ChoosePapers />} />
-          <Route path="/my-week/write" element={<WriteHighlights />} />
-          <Route path="/my-week/review" element={<Review />} />
+          <Route path="/front" element={<RequirePaper tabs><Front /></RequirePaper>} />
+          <Route path="/comics" element={<RequirePaper tabs><Comics /></RequirePaper>} />
+          <Route path="/stars" element={<RequirePaper tabs><Stars /></RequirePaper>} />
+          <Route path="/my-week" element={<RequirePaper tabs><ChoosePapers /></RequirePaper>} />
+          <Route path="/my-week/write" element={<RequirePaper redirect="/my-week"><WriteHighlights /></RequirePaper>} />
+          <Route path="/my-week/review" element={<RequirePaper redirect="/my-week"><Review /></RequirePaper>} />
           <Route path="/papers" element={<Papers />} />
           <Route path="/papers/join" element={<JoinPaper />} />
-          <Route path="/back-issues" element={<BackIssues />} />
+          <Route path="/back-issues" element={<RequirePaper><BackIssues /></RequirePaper>} />
           <Route path="/settings" element={<Settings />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
