@@ -9,7 +9,7 @@
 | 2. Auth, papers, membership        | Done        |
 | 3. AI placeholder layer and safety | Done        |
 | 4. Core routes and data            | Done        |
-| 5. Weather, birthdays, horoscopes  | Not started |
+| 5. Weather, birthdays, horoscopes  | Done        |
 | 6. Retention                       | Not started |
 | 7. Seed data and frontend check    | Not started |
 | 8. Real AI providers               | Not started |
@@ -245,8 +245,8 @@ None right now.
   serverless instance has its own.
 - **Panels wait for the image**, so the generate, rewrite, avatar and panel routes set `maxDuration = 60`.
   Check that the Vercel plan allows that duration.
-- **Horoscopes in the edition bundle stay empty** until Phase 5 generates them. Birthdays are already
-  included (month-day only) when they fall in the edition week.
+- **Horoscopes are written on the first read of a week** for each sign on the paper, then reused.
+  Birthdays are included (month-day only) when they fall in the edition week.
 - **Browser coordinates reach our server** for weather. They're rounded and never stored or logged, but
   they do leave the browser. The web app also sends exact coordinates to BigDataCloud for reverse
   geocoding today; that should go (see the frontend change list).

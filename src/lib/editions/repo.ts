@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { z } from "zod";
-import type { StyleKey, ZodiacSign } from "@/lib/contract/common";
+import type { StyleKey } from "@/lib/contract/common";
 import type {
   editionBundleSchema,
   editionSummarySchema,
@@ -8,7 +8,7 @@ import type {
   reactionSchema,
 } from "@/lib/contract/editions";
 import { getConfig } from "@/lib/config/env";
-import { luckyNumber } from "@/lib/editions/lucky";
+import { horoscopesFor } from "@/lib/editions/horoscopes";
 import { serviceDb } from "@/lib/db/client";
 import { unwrap, unwrapMaybe } from "@/lib/db/errors";
 import type { Json } from "@/lib/db/types";
@@ -151,30 +151,7 @@ export async function getBundle(editionId: string, userId: string): Promise<Bund
     })
     .sort((a, b) => a.monthDay.localeCompare(b.monthDay) || a.name.localeCompare(b.name));
 
-  const horoscopes: Bundle["horoscopes"] = [];
-  if (edition.status === "published") {
-    const signs = [...new Set(members.map((m) => m.zodiacSign).filter((s): s is ZodiacSign => Boolean(s)))];
-    if (signs.length) {
-      const rows = unwrap(
-        await serviceDb()
-          .from("horoscopes")
-          .select("sign, text")
-          .eq("week_start", edition.week_start)
-          .in("sign", signs),
-      );
-      const bySign = new Map(rows.map((r) => [r.sign, r.text]));
-      for (const sign of signs) {
-        const text = bySign.get(sign);
-        if (!text) continue;
-        horoscopes.push({
-          sign,
-          text,
-          luckyNumber: luckyNumber(sign, edition.week_start),
-          userIds: members.filter((m) => m.zodiacSign === sign).map((m) => m.userId),
-        });
-      }
-    }
-  }
+  const horoscopes = await horoscopesFor(edition.week_start, members);
 
   let pages: Bundle["pages"] = [];
   if (edition.status === "published") {

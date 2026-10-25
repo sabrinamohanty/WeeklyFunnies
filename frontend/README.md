@@ -2,7 +2,7 @@
 
 The web app for The Weekly Funnies. Lives in `frontend/` next to the API.
 
-It talks to the backend at `VITE_API_URL` (local default `http://localhost:3000`) with a Supabase bearer token. Phase 2 is live: sign-in, profile, city search, papers, and invites. Stories, comics, weather, avatars, and editions stay local until those routes are built.
+It talks to the backend at `VITE_API_URL` (local default `http://localhost:3000`) with a Supabase bearer token. Sign-in, profile, papers, the weekly page, editions, and weather (`GET /api/weather`) go through the API. Horoscopes and birthdays come from the edition bundle.
 
 ```sh
 # from the repo root

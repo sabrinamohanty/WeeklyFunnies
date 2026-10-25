@@ -5,43 +5,69 @@ import { SignBadge } from '../components/SignBadge'
 import { IconCake, IconCamera, IconChevron, SkyIcon } from '../components/Icons'
 import { Lightbox, type LightboxItem } from '../components/Lightbox'
 import { BRAND, Halftone, Logo, Screen, ThemeToggle, useCountdown } from '../components/ui'
-import { addDays, edition, friends, horoscopes, signFor, signReadings, strips } from '../data'
+import { edition, dayOfMonth, monthDayLabel, signFor, signReadings, swatchCycle, weekLabelFromIso, zodiac } from '../data'
 import { api, userMessage } from '../lib/api'
-import { useActivePaper, useStore } from '../store'
-import { sampleForecast, toWeek } from '../weather'
+import { draftStoriesForPaper, frontEmptyState, lightboxItems, showOwnDraftComic, toggledReaction } from '../lib/page-flow'
+import type { EditionBundle, PublishedPage, PublishedStory, ReactionKind } from '../lib/types'
+import { useActivePaper, useEditionBundle, useStore } from '../store'
+import { browserCoords, fromWeather, toWeek, type Forecast } from '../weather'
 import { CityPicker } from '../components/CityPicker'
+import { lookFor } from './Onboarding'
 import { LogOut } from './Papers'
+
+function sectionLabel(section: string) {
+  return section ? section[0]!.toUpperCase() + section.slice(1) : 'News'
+}
+
+function memberOf(bundle: EditionBundle, userId: string) {
+  return bundle.members.find(m => m.userId === userId) ?? null
+}
 
 export function Front() {
   const nav = useNavigate()
   const { state } = useStore()
   const paper = useActivePaper()
-  const mine = state.draft && paper && state.published.includes(paper.id) ? state.draft.stories : []
-  const emptyStand = state.papers.length === 0
-  const fresh = Boolean(paper)
+  const bundle = useEditionBundle()
+  const published = bundle?.edition.status === 'published'
+  const pages = bundle?.pages ?? []
+  const mine = draftStoriesForPaper(published, paper?.id, state.page?.papers, state.draft?.stories)
+  const empty = frontEmptyState({
+    paperCount: state.papers.length,
+    published,
+    publishedPageCount: pages.length,
+    ownStoryCount: mine.length,
+  })
 
   return (
     <Screen tabs>
       <header className="masthead">
-        <div className="meta-row"><span>Vol. {edition.vol} · No. {fresh ? 1 : edition.no}</span><ThemeToggle /></div>
+        <div className="meta-row">
+          <span>Vol. 1 · No. {bundle?.edition.issueNumber ?? 1}</span>
+          <ThemeToggle />
+        </div>
         <h1 className="nameplate"><Logo size="lg" /></h1>
         <div className="double-rule" />
-        <button className="dateline" onClick={() => nav('/papers')}>{edition.date} · {BRAND}</button>
+        <button className="dateline" onClick={() => nav('/papers')}>
+          {bundle ? `${weekLabelFromIso(bundle.edition.weekStart)} · ${bundle.edition.paperName}` : `${edition.date} · ${BRAND}`}
+        </button>
       </header>
 
       <WeatherWeek />
 
+      {published && pages.flatMap(page => page.stories.map(story => (
+        <PublishedStoryCard key={story.id} bundle={bundle!} page={page} story={story} />
+      )))}
 
       {mine.map(s => (
-        <article key={s.highlightId} className="story fresh">
-          <p className="kicker">Hot off the press · You</p>
+        <article key={s.id} className="story fresh">
+          <p className="kicker">Your page · waiting for press</p>
           <h2 className="headline">{s.headline}</h2>
           <p className="byline">By {state.profile.name.trim() || 'You'}</p>
           <p className="story-body">{s.article}</p>
         </article>
       ))}
 
-      {emptyStand && (
+      {empty === 'join' && (
         <section className="empty-edition">
           <p className="kicker">Your newsstand</p>
           <h2 className="headline">Join a paper to start reading</h2>
@@ -50,11 +76,20 @@ export function Front() {
         </section>
       )}
 
-      {fresh && !emptyStand && mine.length === 0 && (
+      {empty === 'published-empty' && (
         <section className="empty-edition">
           <p className="kicker">Coming soon</p>
-          <h2 className="headline">This week's edition of {paper!.name} is still being written</h2>
-          <p className="story-body">Stories and comics from the API land here once everyone approves. You can still write a local preview of your week.</p>
+          <h2 className="headline">This week's edition of {paper?.name} has no pages yet</h2>
+          <p className="story-body">Approved pages appear here after the editor goes to press.</p>
+          <Link to="/my-week" className="btn btn-primary">Add my highlights</Link>
+        </section>
+      )}
+
+      {empty === 'draft-empty' && (
+        <section className="empty-edition">
+          <p className="kicker">Coming soon</p>
+          <h2 className="headline">This week's edition of {paper?.name} is still being written</h2>
+          <p className="story-body">Stories and comics appear here after the editor publishes. You can still write and approve your page.</p>
           <Link to="/my-week" className="btn btn-primary">Add my highlights</Link>
         </section>
       )}
@@ -72,36 +107,106 @@ export function Front() {
   )
 }
 
+function PublishedStoryCard({ bundle, page, story }: { bundle: EditionBundle; page: PublishedPage; story: PublishedStory }) {
+  const author = memberOf(bundle, page.authorId)
+  return (
+    <article className="story">
+      <p className="kicker">{sectionLabel(story.section)}</p>
+      <h2 className="headline">{story.headline}</h2>
+      <p className="byline">By {author?.name || 'Staff'}</p>
+      <p className="story-body">{story.body}</p>
+      <StoryReactions editionId={bundle.edition.id} story={story} />
+    </article>
+  )
+}
+
+function StoryReactions({ editionId, story }: { editionId: string; story: PublishedStory }) {
+  const { set, toast } = useStore()
+  const react = async (kind: ReactionKind) => {
+    try {
+      const next = toggledReaction(story.myReaction, kind)
+      const { reactions, myReaction } = await api.setReaction(editionId, story.id, next)
+      set(s => ({
+        bundle: s.bundle ? {
+          ...s.bundle,
+          pages: s.bundle.pages.map(p => ({
+            ...p,
+            stories: p.stories.map(st => st.id === story.id ? { ...st, reactions, myReaction } : st),
+          })),
+        } : s.bundle,
+      }))
+    } catch (e) {
+      toast(userMessage(e))
+    }
+  }
+  return (
+    <div className="reactions">
+      {(['ha', 'aww', 'hooray'] as const).map(k => (
+        <button key={k} type="button" className={`reaction ${story.myReaction === k ? 'on' : ''}`} onClick={() => void react(k)}>
+          {k === 'ha' ? 'Ha' : k === 'aww' ? 'Aww' : 'Hooray'}<span>{story.reactions[k]}</span>
+        </button>
+      ))}
+    </div>
+  )
+}
+
 function WeatherWeek() {
   const { state, set, toast } = useStore()
   const [changing, setChanging] = useState(false)
+  const [live, setLive] = useState<{ forecast: Forecast; timeZone: string; status: string } | null>(null)
+  const [status, setStatus] = useState('Loading the forecast…')
   const scroller = useRef<HTMLDivElement>(null)
-  const forecast = sampleForecast(state.profile.city || 'Your city')
-  const week = toWeek(forecast)
-  const place = (state.profile.city || forecast.location).split(',')[0]
+  const forecast = live?.forecast ?? null
+  const week = forecast ? toWeek(forecast, new Date(), live?.timeZone) : []
+  const place = (forecast?.location || state.profile.city || '').split(',')[0]
   const pickCity = (city: { id: number; label: string }) => {
     set(s => ({ profile: { ...s.profile, city: city.label, cityId: city.id } }))
     setChanging(false)
     void api.updateMe({ cityId: city.id }).catch(e => toast(userMessage(e)))
   }
 
-  // Bring today into view without scrolling the page itself.
+  useEffect(() => {
+    let alive = true
+    setLive(null)
+    setStatus('Loading the forecast…')
+    void (async () => {
+      try {
+        const coords = await browserCoords()
+        const { weather } = await api.weather(coords ?? undefined)
+        if (!alive) return
+        if (!weather) {
+          setStatus(state.profile.city ? 'Weather is unavailable for that city.' : '')
+          return
+        }
+        const where = weather.place ?? 'Near you'
+        setLive({
+          forecast: fromWeather(weather, where),
+          timeZone: weather.timezone,
+          status: weather.source === 'location' ? 'Near you · °C' : '°C',
+        })
+      } catch {
+        if (alive) setStatus('Weather is unavailable right now.')
+      }
+    })()
+    return () => { alive = false }
+  }, [state.profile.city, state.profile.cityId])
+
   useEffect(() => {
     const el = scroller.current
     const today = el?.querySelector<HTMLElement>('.wx-day.today')
     if (el && today) el.scrollLeft = today.offsetLeft - el.offsetLeft - 8
   }, [week.length])
 
-  const status = 'Sample · live weather comes from the API next'
+  const statusText = live?.status || status
 
   return (
     <section className="weather-week" aria-label={place ? `Weather this week in ${place}` : 'Weather this week'}>
       <div className="weather-head">
         <span className="eyebrow">{place ? `${place} weather` : 'Your weather'}</span>
-        <span className="weather-status warn">{status}</span>
+        <span className={`weather-status ${live ? '' : 'warn'}`}>{statusText}</span>
       </div>
 
-      {!state.profile.city ? (
+      {!forecast && !state.profile.city ? (
         <div className="wx-need">
           <p>Pick your city to see your weather.</p>
           <CityPicker id="wx-city" value="" onPick={pickCity} />
@@ -109,7 +214,7 @@ function WeatherWeek() {
       ) : (
         <>
           <div className="wx-source">
-            <span>{state.profile.city}</span>
+            <span>{state.profile.city || forecast?.location}</span>
             <button className="link small" aria-expanded={changing} onClick={() => setChanging(c => !c)}>{changing ? 'Cancel' : 'Change'}</button>
           </div>
           {changing && <CityPicker id="wx-city" value="" autoFocus onPick={pickCity} />}
@@ -133,55 +238,104 @@ function WeatherWeek() {
 }
 
 export function Comics() {
-  const [open, setOpen] = useState<{ strip: number; panel: number } | null>(null)
+  const { state } = useStore()
+  const bundle = useEditionBundle()
+  const [open, setOpen] = useState<{ page: number; panel: number } | null>(null)
+  const look = lookFor(state.avatar)
+  const published = bundle?.edition.status === 'published'
+  const strips = (bundle?.pages ?? []).filter(p => p.comic)
+  const own = showOwnDraftComic(published, state.draft?.panels.length ?? 0, Boolean(state.page?.comic)) && state.page?.comic
+    ? [{ title: state.page.comic.title || 'Your strip', author: state.profile.name.trim() || 'You', comic: state.page.comic, style: state.style, avatarUrl: state.avatarUrl }]
+    : []
 
-  const items = (si: number): LightboxItem[] => {
-    const st = strips[si]!
-    const f = friends[st.author]!
-    return st.panels.map((p, k) => ({
-      swatch: p.swatch, label: `Panel ${k + 1} · ${p.photos} real photo${p.photos > 1 ? 's' : ''}`, caption: p.caption,
-      art: <Cartoon look={f.look} mood={p.mood} className="lightbox-art" />,
-    }))
+  const itemsFor = (page: PublishedPage, startPanel: number): { items: LightboxItem[]; start: number } => {
+    const built = lightboxItems(
+      (page.comic?.panels ?? []).map(p => ({ caption: p.caption, photos: p.photos, imageUrl: p.image.url })),
+      startPanel,
+    )
+    return {
+      start: built.start,
+      items: built.items.map(item => ({
+        swatch: swatchCycle[item.panelIndex % swatchCycle.length]!,
+        label: item.label,
+        caption: item.caption,
+        image: item.image,
+      })),
+    }
   }
 
   return (
     <Screen tabs>
       <header className="minimast rule-single solo"><Logo /></header>
       <h1 className="comic-title">Sunday Funnies</h1>
-      <p className="note">Tap any panel to see the real photos</p>
-      {strips.map((st, si) => {
-        const f = friends[st.author]!
+      <p className="note">{published ? 'Tap any panel to see the real photos' : 'Comics print after the editor publishes.'}</p>
+
+      {published && strips.map((page, si) => {
+        const author = memberOf(bundle!, page.authorId)
+        const comic = page.comic!
         return (
-          <section key={st.id} className="strip" style={{ animationDelay: `${si * 90}ms` }}>
-            <div className="strip-head"><h2>{st.title}</h2><span>by {f.name}</span></div>
+          <section key={page.pageId} className="strip" style={{ animationDelay: `${si * 90}ms` }}>
+            <div className="strip-head"><h2>{comic.title}</h2><span>by {author?.name || 'Staff'}</span></div>
             <div className="strip-frame">
-              {st.panels.map((p, k) => (
-                <button key={k} className={`ht c-${p.swatch} panel`} onClick={() => setOpen({ strip: si, panel: k })}
-                  aria-label={`${st.title}, panel ${k + 1}: ${p.caption}`}>
-                  <Cartoon look={f.look} mood={p.mood} />
-                  <span className="panel-count"><IconCamera size={15} /> {p.photos}</span>
+              {comic.panels.map((p, k) => (
+                <button key={k} className={`ht c-${swatchCycle[k % swatchCycle.length]} panel`} onClick={() => setOpen({ page: si, panel: k })}
+                  aria-label={`${comic.title}, panel ${k + 1}: ${p.caption ?? ''}`}>
+                  {p.image.url
+                    ? <img className="panel-art" src={p.image.url} alt="" />
+                    : author?.avatarUrl
+                      ? <img className="panel-art" src={author.avatarUrl} alt="" />
+                      : <Cartoon look={look} style={page.style} />}
+                  {p.photos.length > 0 && <span className="panel-count"><IconCamera size={15} /> {p.photos.length}</span>}
+                  {p.caption && <span className="panel-caption">{p.caption}</span>}
                 </button>
               ))}
             </div>
           </section>
         )
       })}
+
+      {own.map(st => (
+        <section key="mine" className="strip">
+          <div className="strip-head"><h2>{st.title}</h2><span>by {st.author}</span></div>
+          <div className="strip-frame">
+            {st.comic.panels.map((p, k) => (
+              <div key={k} className={`ht c-${swatchCycle[k % swatchCycle.length]} panel`}>
+                {p.image.url
+                  ? <img className="panel-art" src={p.image.url} alt="" />
+                  : <Cartoon look={look} style={st.style} />}
+                {p.caption && <span className="panel-caption">{p.caption}</span>}
+              </div>
+            ))}
+          </div>
+        </section>
+      ))}
+
+      {strips.length === 0 && own.length === 0 && (
+        <section className="empty-edition">
+          <p className="kicker">The funny pages</p>
+          <h2 className="headline">No comics in this edition yet</h2>
+          <p className="story-body">Approved strips appear here after the editor publishes.</p>
+          <Link to="/my-week" className="btn btn-primary">Write my week</Link>
+        </section>
+      )}
+
       <Link to="/stars" className="next-link">Next: Stars &amp; Birthdays <IconChevron size={18} /></Link>
-      {open && <Lightbox title={strips[open.strip]!.title} items={items(open.strip)} start={open.panel} onClose={() => setOpen(null)} />}
+      {open && bundle && strips[open.page] && (() => {
+        const { items, start } = itemsFor(strips[open.page]!, open.panel)
+        return items.length ? <Lightbox title={strips[open.page]!.comic!.title} items={items} start={start} onClose={() => setOpen(null)} /> : null
+      })()}
     </Screen>
   )
 }
 
 export function Stars() {
-  const { state, toast } = useStore()
-  const [cheered, setCheered] = useState(false)
-  const press = useCountdown(edition.nextPress)
+  const { state } = useStore()
+  const bundle = useEditionBundle()
+  const pressTarget = bundle?.edition.deadline ? new Date(bundle.edition.deadline) : edition.nextPress
+  const press = useCountdown(pressTarget)
   const mySign = state.profile.birthday ? signFor(state.profile.birthday) : null
-
-  const cheer = () => {
-    setCheered(true)
-    toast('Taco nomination sent to Maya 🌮')
-  }
+  const birthdays = bundle?.birthdays ?? []
+  const horoscopes = bundle?.horoscopes ?? []
 
   return (
     <Screen tabs>
@@ -189,16 +343,25 @@ export function Stars() {
       <h1 className="display center">Stars &amp; Birthdays</h1>
       <p className="note">For entertainment only. Mostly.</p>
 
-      <Halftone swatch="yellow" className={`bday ${cheered ? 'cheered' : ''}`}>
-        <IconCake />
-        <div>
-          <p className="eyebrow dark">Birthdays this week</p>
-          <h2>Maya turns 21 on {addDays(edition.monday, 2).toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}</h2>
-          <p>The crew is accepting taco nominations.</p>
-          <button className="btn btn-sm on-color" onClick={cheer} disabled={cheered}>{cheered ? 'Nominated!' : 'Nominate a taco'}</button>
-        </div>
-        {cheered && <div className="confetti" aria-hidden="true">{Array.from({ length: 18 }, (_, i) => <i key={i} style={{ ['--i' as string]: i }} />)}</div>}
-      </Halftone>
+      {birthdays.length > 0 ? birthdays.map(b => (
+        <Halftone key={b.userId} swatch="yellow" className="bday">
+          <IconCake />
+          <div>
+            <p className="eyebrow dark">Birthdays this week</p>
+            <h2>{b.name} on {monthDayLabel(b.monthDay)}</h2>
+            <p>The year stays off the record.</p>
+          </div>
+        </Halftone>
+      )) : (
+        <Halftone swatch="yellow" className="bday">
+          <IconCake />
+          <div>
+            <p className="eyebrow dark">Birthdays this week</p>
+            <h2>No birthdays in this edition</h2>
+            <p>When someone on the paper has a birthday this week, it lands here.</p>
+          </div>
+        </Halftone>
+      )}
 
       <div className="rule-heading"><span>Your horoscopes</span></div>
       <ul className="horoscopes">
@@ -207,23 +370,32 @@ export function Stars() {
             <SignBadge sign={mySign.sign} abbr={mySign.abbr} swatch="purple" big />
             <div>
               <div className="horo-head"><h3>{mySign.sign}</h3><span className="you-tag">You</span></div>
-              <p>{signReadings[mySign.sign]}</p>
-              <p className="lucky">Lucky number {new Date(state.profile.birthday).getUTCDate()}</p>
+              <p>{horoscopes.find(h => h.sign.toLowerCase() === mySign.sign.toLowerCase())?.text ?? signReadings[mySign.sign]}</p>
+              <p className="lucky">Lucky number {horoscopes.find(h => h.sign.toLowerCase() === mySign.sign.toLowerCase())?.luckyNumber ?? dayOfMonth(state.profile.birthday) ?? '—'}</p>
             </div>
           </li>
         )}
-        {horoscopes.map(h => (
-          <li key={h.sign}>
-            <SignBadge sign={h.sign} abbr={h.abbr} swatch={h.swatch} big />
-            <div>
-              <div className="horo-head"><h3>{h.sign}</h3><span>{friends[h.friend]!.first}</span></div>
-              <p>{h.text}</p>
-              <p className="lucky">Lucky number {h.lucky}</p>
-            </div>
-          </li>
-        ))}
+        {horoscopes.filter(h => h.sign.toLowerCase() !== mySign?.sign.toLowerCase()).map(h => {
+          const named = zodiac.find(z => z.sign.toLowerCase() === h.sign.toLowerCase())
+          const names = h.userIds.map(id => bundle ? memberOf(bundle, id)?.name : null).filter(Boolean).join(', ')
+          return (
+            <li key={h.sign}>
+              <SignBadge sign={named?.sign ?? h.sign} abbr={named?.abbr ?? h.sign.slice(0, 2)} swatch="blue" big />
+              <div>
+                <div className="horo-head"><h3>{named?.sign ?? h.sign}</h3>{names && <span>{names}</span>}</div>
+                <p>{h.text}</p>
+                <p className="lucky">Lucky number {h.luckyNumber}</p>
+              </div>
+            </li>
+          )
+        })}
       </ul>
-      <p className="press-note">Next edition goes to press {edition.nextPressLabel}{press.ms > 0 && <> · in {press.label}</>}</p>
+      {horoscopes.length === 0 && <p className="hint">Crew horoscopes show up here once birthdays are on file.</p>}
+      <p className="press-note">
+        {bundle
+          ? <>This edition {bundle.edition.status === 'published' ? 'is on the stands' : `closes ${press.ms > 0 ? `in ${press.label}` : 'now'}`}</>
+          : <>Next edition goes to press {edition.nextPressLabel}{press.ms > 0 && <> · in {press.label}</>}</>}
+      </p>
     </Screen>
   )
 }

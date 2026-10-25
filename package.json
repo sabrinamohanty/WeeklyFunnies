@@ -16,7 +16,7 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test": "vitest run --project unit --project ai",
+    "test": "vitest run --project unit --project ai && pnpm --dir frontend test",
     "test:watch": "vitest --project unit --project ai",
     "test:integration": "vitest run --project integration",
     "test:all": "vitest run",

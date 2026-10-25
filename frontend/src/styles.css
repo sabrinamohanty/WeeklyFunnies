@@ -307,7 +307,7 @@ select.field {
 .pitch { font: italic 800 clamp(24px, 7vw, 30px)/1.2 var(--f-head); text-align: center; text-wrap: balance; padding-inline: 8px; }
 .invite-row { display: flex; align-items: center; gap: 18px; border-block: 1.5px solid var(--ink); padding: 14px 0; font-size: 19px; line-height: 1.35; }
 .avatar-circle { flex: none; width: 64px; height: 64px; border-radius: 50%; border: 2.5px solid #1c1916; overflow: hidden; display: grid; place-items: center; }
-.avatar-circle svg { width: 100%; height: 100%; }
+.avatar-circle svg, .avatar-circle img { width: 100%; height: 100%; object-fit: cover; }
 
 .foot { margin-top: auto; padding-top: 40px; display: flex; flex-direction: column; gap: 14px; text-align: center; font-size: 18px; }
 .fine { font-size: 15px; color: var(--muted); }
@@ -334,9 +334,11 @@ select.field {
 .portrait { aspect-ratio: 1; border: 2px solid var(--ink); display: grid; place-items: center; overflow: hidden; position: relative; color: #1c1916; }
 .portrait.selfie img { width: 100%; height: 100%; object-fit: cover; filter: grayscale(1) contrast(1.1); }
 .portrait.art { border-width: 3px; align-items: end; }
-.portrait.art svg { width: 100%; height: 100%; transition: transform 0.4s var(--ease); }
-.portrait.drawing svg { transform: scale(0.85) rotate(-6deg); filter: blur(2px); opacity: 0.5; }
+.portrait.art svg, .portrait.art img { width: 100%; height: 100%; object-fit: cover; transition: transform 0.4s var(--ease); }
+.portrait.drawing svg, .portrait.drawing img { transform: scale(0.85) rotate(-6deg); filter: blur(2px); opacity: 0.5; }
 .inking { position: absolute; inset: auto 0 40%; text-align: center; font: 26px var(--f-comic); letter-spacing: 0.05em; color: #1c1916; animation: pop 0.3s var(--ease); }
+.consent { display: flex; align-items: flex-start; gap: 10px; margin: 14px 0 4px; font-size: 16px; color: var(--muted); line-height: 1.35; }
+.consent .check { margin-top: 3px; flex: none; }
 
 .style-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .style-card {
@@ -443,13 +445,20 @@ select.field {
   transition: transform 0.2s var(--ease);
 }
 .panel svg { width: 80%; height: auto; display: block; }
+.panel img.panel-art { width: 100%; height: 100%; object-fit: cover; display: block; }
+.panel-caption {
+  position: absolute; left: 6px; right: 6px; bottom: 6px; z-index: 1;
+  background: #fbf8f0; color: #1c1916; border: 1.5px solid #1c1916;
+  padding: 3px 6px; font: 600 13px/1.25 var(--f-body); text-align: center;
+}
+.strip-frame.editable .panel-caption { bottom: 36px; }
 button.panel:hover { transform: scale(1.04) rotate(-1deg); z-index: 1; }
 .panel-count { position: absolute; right: 6px; bottom: 8px; background: #1c1916; color: #fbf8f0; display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; font: 600 15px system-ui, sans-serif; }
 .next-link { align-self: center; display: inline-flex; align-items: center; gap: 6px; font: 700 19px var(--f-head); padding: 14px; text-decoration: underline; text-underline-offset: 4px; }
 
 .strip-frame.editable .panel { cursor: grab; align-items: flex-end; }
 .panel.dragging { opacity: 0.45; transform: scale(0.95); }
-.panel.redrawing svg { animation: scribble 0.55s ease-in-out; }
+.panel.redrawing svg, .panel.redrawing img { animation: scribble 0.55s ease-in-out; }
 @keyframes scribble { 30% { transform: rotate(-8deg) scale(0.8); filter: blur(2px); opacity: 0.3; } 60% { transform: rotate(6deg) scale(0.9); } }
 .panel-label { position: absolute; top: 6px; left: 6px; background: #fbf8f0; color: #1c1916; border: 1.5px solid #1c1916; padding: 1px 6px; font-size: 13px; white-space: nowrap; display: inline-flex; align-items: center; gap: 2px; z-index: 1; }
 .panel-redraw {
@@ -467,6 +476,7 @@ button.panel:hover { transform: scale(1.04) rotate(-1deg); z-index: 1; }
 .lightbox-stage { aspect-ratio: 0.85; border: 4px solid #f3efe4; display: flex; align-items: flex-end; justify-content: center; position: relative; overflow: hidden; animation: pop 0.3s var(--ease); }
 .lightbox-stage .photo-tag { position: absolute; top: 16px; left: 50%; transform: translateX(-50%); white-space: nowrap; }
 .lightbox-art { width: 80%; }
+.lightbox-photo { width: 100%; height: 100%; object-fit: cover; display: block; }
 .lightbox-caption { font: italic 700 22px var(--f-head); text-align: center; }
 .lightbox-nav { display: flex; justify-content: space-between; align-items: center; }
 .lightbox-dots { display: flex; gap: 10px; }

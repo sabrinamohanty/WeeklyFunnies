@@ -8,6 +8,7 @@ import { GET as listEditions } from "@/app/api/papers/[paperId]/editions/route";
 import { POST as createPaper } from "@/app/api/papers/route";
 import { GET as runJobs } from "@/app/api/internal/jobs/route";
 import { routes } from "@/lib/contract/routes";
+import { luckyNumber } from "@/lib/editions/lucky";
 import { call, expectError, expectOk } from "./helpers/api";
 import { PREVIOUS_MONDAY, type TestUser, createUser, deleteUsers, must, serviceClient } from "./helpers/db";
 
@@ -62,6 +63,14 @@ describe("editions", () => {
       routes.getEditionBundle,
     );
     expect(bundle.pages).toEqual([]);
+    expect(bundle.horoscopes).toEqual([
+      {
+        sign: "libra",
+        text: "A bright week ahead for libra. Say yes to a small adventure with friends.",
+        luckyNumber: luckyNumber("libra", edition.weekStart),
+        userIds: [ama.id],
+      },
+    ]);
     expect(bundle.progress).toEqual([expect.objectContaining({ userId: ama.id, status: "not_started" })]);
     expect(bundle.edition.paperName).toBe("Campus Gazette");
 
@@ -194,6 +203,13 @@ describe("editions", () => {
     expect(bundle.pages).toHaveLength(1);
     expect(bundle.pages[0]?.stories[0]?.reactions.ha).toBe(1);
     expect(bundle.birthdays.some((b) => b.userId === ama.id && b.monthDay === "10-15")).toBe(true);
+    expect(bundle.horoscopes).toEqual([
+      expect.objectContaining({
+        sign: "libra",
+        luckyNumber: luckyNumber("libra", PREVIOUS_MONDAY),
+        userIds: [ama.id],
+      }),
+    ]);
 
     const { editions } = await expectOk(
       await call(listEditions, {
