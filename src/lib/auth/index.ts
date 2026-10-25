@@ -2,6 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import { serviceDb } from "@/lib/db/client";
 import { ApiError } from "@/lib/http/errors";
 import { log } from "@/lib/log/logger";
+import { noteActivity } from "@/lib/retention/activity";
 
 export interface AuthUser {
   id: string;
@@ -46,6 +47,7 @@ export const supabaseAuthenticator: Authenticator = async (req) => {
   }
   const sessionId = sessionIdFromToken(token);
   if (!sessionId) throw new ApiError("unauthorized");
+  await noteActivity(data.user.id);
   return { id: data.user.id, sessionId };
 };
 

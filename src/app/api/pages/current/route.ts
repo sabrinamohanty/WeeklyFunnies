@@ -1,5 +1,11 @@
 import { routes } from "@/lib/contract/routes";
-import { notImplemented } from "@/lib/http/handler";
+import { defineRoute } from "@/lib/http/handler";
+import { getCurrentAuthorPage, setCurrentPapers } from "@/lib/pages/repo";
 
-export const GET = notImplemented(routes.getCurrentPage);
-export const PUT = notImplemented(routes.setCurrentPagePapers);
+export const GET = defineRoute(routes.getCurrentPage, async ({ user }) => ({
+  data: { page: await getCurrentAuthorPage(user.id) },
+}));
+
+export const PUT = defineRoute(routes.setCurrentPagePapers, async ({ user, body }) => ({
+  data: { page: await setCurrentPapers(user.id, body.paperIds) },
+}));

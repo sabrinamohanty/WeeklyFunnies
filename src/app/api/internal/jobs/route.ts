@@ -1,4 +1,7 @@
 import { routes } from "@/lib/contract/routes";
-import { notImplemented } from "@/lib/http/handler";
+import { failStuckPanels } from "@/lib/editions/repo";
+import { defineRoute } from "@/lib/http/handler";
 
-export const GET = notImplemented(routes.runJobs);
+export const GET = defineRoute(routes.runJobs, async () => ({
+  data: { processed: await failStuckPanels() },
+}));

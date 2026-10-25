@@ -5,9 +5,12 @@ import { GoogleMark, IconEye, IconMail } from '../components/Icons'
 import { BRAND, Halftone, Logo, MiniMast, OrRule, Screen } from '../components/ui'
 import { friends, stories } from '../data'
 import { supabase } from '../lib/auth'
+import { shareInflight } from '../lib/inflight'
 import { isProfileReady, useStore } from '../store'
 
 const emailOk = (v: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)
+
+const signInLinks = new Map<string, ReturnType<typeof supabase.auth.signInWithOtp>>()
 
 function afterSignIn(nav: ReturnType<typeof useNavigate>, ready: boolean) {
   nav(ready ? '/front' : '/onboarding/profile', { replace: true })
@@ -210,10 +213,12 @@ export function CheckEmail() {
   const send = async () => {
     if (!emailOk(email)) return toast('Go back and enter your email first.')
     setSending(true)
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-      options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
-    })
+    const { error } = await shareInflight(signInLinks, email.trim().toLowerCase(), () =>
+      supabase.auth.signInWithOtp({
+        email,
+        options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
+      }),
+    )
     setSending(false)
     if (error) return toast(error.message)
     setLeft(30)

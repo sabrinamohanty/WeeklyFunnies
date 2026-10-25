@@ -90,6 +90,33 @@ export const demoNow = () => new Date(DEMO_TODAY.getTime() + (Date.now() - loade
 
 export const edition = currentEdition()
 
+/** Week label from an API `weekStart` (YYYY-MM-DD, Monday). */
+function calendarDate(year: number, month: number, day: number) {
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return null
+  if (year < 1 || month < 1 || month > 12 || day < 1 || day > 31) return null
+  const date = new Date(year, month - 1, day)
+  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) return null
+  return date
+}
+
+export function weekLabelFromIso(weekStart: string) {
+  const [y, m, d] = weekStart.split('-').map(Number)
+  const date = calendarDate(y ?? NaN, m ?? NaN, d ?? NaN)
+  return date ? weekLabel(date) : edition.week
+}
+
+export function monthDayLabel(monthDay: string) {
+  const [m, d] = monthDay.split('-').map(Number)
+  const date = calendarDate(2000, m ?? NaN, d ?? NaN)
+  return date ? date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : monthDay
+}
+
+/** Day of a `YYYY-MM-DD` birthday. Date parsing would shift this across timezones. */
+export function dayOfMonth(isoDate: string) {
+  const day = Number(isoDate.split('-')[2])
+  return day >= 1 && day <= 31 && Number.isInteger(day) ? day : null
+}
+
 export interface Story {
   id: string
   section: string

@@ -3,7 +3,7 @@ import { IconBack, IconChevron, IconX } from './Icons'
 import { Overlay } from './ui'
 import type { Swatch } from '../data'
 
-export interface LightboxItem { swatch: Swatch; label: string; caption?: string; art?: ReactNode }
+export interface LightboxItem { swatch: Swatch; label: string; caption?: string; art?: ReactNode; image?: string }
 
 /** Full-screen viewer for panels and story photos. Arrow keys, swipe and Esc all work. */
 export function Lightbox({ title, items, start = 0, onClose }: { title: string; items: LightboxItem[]; start?: number; onClose: () => void }) {
@@ -42,8 +42,8 @@ export function Lightbox({ title, items, start = 0, onClose }: { title: string; 
             <button ref={closeRef} className="icon-btn light" aria-label="Close" onClick={onClose}><IconX /></button>
           </div>
           <div key={i} className={`lightbox-stage ht c-${item.swatch}`}>
-            {item.art}
-            <span className="photo-tag">[{item.label}]</span>
+            {item.image ? <img className="lightbox-photo" src={item.image} alt={item.label} /> : item.art}
+            {!item.image && <span className="photo-tag">[{item.label}]</span>}
           </div>
           {item.caption && <p className="lightbox-caption">{item.caption}</p>}
           {items.length > 1 && (

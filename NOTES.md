@@ -8,9 +8,9 @@
 | 1. Database, storage, RLS          | Done        |
 | 2. Auth, papers, membership        | Done        |
 | 3. AI placeholder layer and safety | Done        |
-| 4. Core routes and data            | Next        |
-| 5. Weather, birthdays, horoscopes  | Not started |
-| 6. Retention                       | Not started |
+| 4. Core routes and data            | Done        |
+| 5. Weather, birthdays, horoscopes  | Done        |
+| 6. Retention                       | Done        |
 | 7. Seed data and frontend check    | Not started |
 | 8. Real AI providers               | Not started |
 
@@ -53,12 +53,13 @@ pnpm dev
   policies (`…0300`).
 - `supabase/migrations/…0400`: the rate-limit table and the `create_paper` and `join_paper` functions
   (service role only).
-- `src/lib/db/`, `src/lib/papers/`, `src/lib/profile/`, `src/lib/geo/`: the service-key client, repos,
-  invite codes, and the Open-Meteo geocoder.
+- `src/lib/db/`, `src/lib/papers/`, `src/lib/profile/`, `src/lib/pages/`, `src/lib/editions/`,
+  `src/lib/avatar/`, `src/lib/geo/`, `src/lib/time/`: the service-key client, repos, invite codes,
+  week/deadline helper, and the Open-Meteo geocoder.
 - `tests/ai/`: the full text-case suite through highlight moderation, the page writer, name and city fields, failure paths, and safety
   unit tests. `live.test.ts` runs only with `AI_LIVE_TESTS=1`.
 - `tests/integration/`: two-user table tests, storage tests, database invariant tests, and API tests for
-  `me`, papers, invites, and joining.
+  `me`, papers, invites, joining, pages, avatars, editions, and reactions.
 
 ## Auth and papers (Phase 2)
 
@@ -130,31 +131,31 @@ Deviations from the handoff, on purpose:
 
 ## Database (Phase 1)
 
-Phase 3 migration `…0500` added `papers.style`, `profiles.look` and `profiles.avatar_traits`, an 8-member
-cap, and a style argument on `create_paper`. The story, panel, per-style avatar and highlight tables come
-in Phase 4.
+Phase 3 migration `…0500` added looks and an 8-member cap. Phase 4 migration `…0700` dropped `events`
+and added `pages`, `page_papers`, `highlights`, `stories`, `panels`, and `reactions`, plus
+`editions.saved_at` and `editions.issue_number`. Style lives on the profile (`…0600`).
 
-Tables: `profiles`, `avatar_drafts`, `papers`, `paper_members`, `invites`, `editions`, `events`, `photos`,
-`horoscopes`, and `storage_deletions`. Helper functions live in a private `app` schema that the REST API
-doesn't expose.
+Tables: `profiles`, `avatar_drafts`, `papers`, `paper_members`, `invites`, `editions`, `pages`,
+`page_papers`, `highlights`, `photos`, `stories`, `panels`, `reactions`, `horoscopes`, and
+`storage_deletions`. Helper functions live in a private `app` schema that the REST API doesn't expose.
 
 Differences from the original data model table:
 
 - **`users` is named `profiles`**, to avoid confusion with Supabase's `auth.users`. It's keyed by the auth
   user id and created automatically when a user signs up.
-- **`events.panel_prompt` is `panel_spec`** (JSON), matching the structured `PanelSpec`.
-- **New `avatar_drafts` table** (server only) holds the selfie path and draft avatar until approval.
+- **A page is per person per week**, linked to papers through `page_papers`. Photo and panel paths are
+  `{user_id}/{uuid}.ext`.
+- **New `avatar_drafts` table** (server only) holds the selfie path, trait form, and draft avatar.
 - **New `storage_deletions` outbox.** Deleting or replacing any row that points at a file queues that file
   here automatically. The Phase 6 purge worker removes the files, so rows and files stay in sync and
   purges can be retried safely.
-- **`events` and `photos` also store `paper_id`.** Foreign keys use it to guarantee that an event belongs
-  to its edition's paper, that its author is a member, and that a photo's author matches its event.
 
 What the database enforces for every role, including the service key the API uses:
 
-- Published editions are read-only: no new events or photos, and no content or approval changes. A panel
-  can still finish generating, and publishing can't be undone.
-- Limits: at most 3 highlights per person per edition, 4 photos per event, and 8 members per paper.
+- Published editions are read-only: no new highlights, photos, or stories, and no content or approval
+  changes. A panel can still finish generating, and publishing can't be undone. Deadline lock is
+  timezone-aware and enforced in the API.
+- Limits: at most 3 highlights per page, 4 photos per highlight, 4 panels, and 8 members per paper.
   Weeks must start on a Monday.
 - Storage paths must sit inside the author's own folder.
 - Text lengths match the API limits. The zodiac sign is derived from the birthday.
@@ -187,6 +188,9 @@ What app roles can do directly (defense in depth; the app is meant to go through
     saved the edition (kept forever, for every member);
   - the avatar is part of the profile and is kept;
   - the selfie is kept until avatar approval, 1 hour at most.
+  - `GET /api/internal/cleanup` (cron secret) deletes those rows, drains `storage_deletions`, and prunes
+    rate-limit windows older than an hour. The web app calls `POST /api/session/logout` before the local
+    sign-out.
 - **Papers:** a user can be in several papers. Weeks start Monday in the owner's timezone and close at
   the deadline, Sunday 11:59 p.m. in that timezone. Each member approves their own page; the owner
   publishes manually after the deadline.
@@ -220,15 +224,13 @@ None right now.
 
 - **Cron frequency:** Vercel Hobby runs crons at most once a day. The jobs sweep wants every minute, so it
   needs Vercel Pro, or Supabase `pg_cron` with `pg_net` calling the internal route.
-- **Rate-limit pruning:** `rate_limit_prune()` exists but isn't scheduled yet. The cron sweep should call
-  it (Phase 6).
 - **Rate limiter fails open:** a Postgres outage disables rate limits rather than blocking all traffic.
   The IP and per-user limits come back as soon as the database does.
 - **Auth round trip:** each request calls Supabase Auth to check the session. That's what makes sign-out
   take effect immediately, at the cost of some latency.
-- **Published-event deletes:** the database allows them so retention purges work. The API must block users
-  from deleting published events (Phase 4).
-- **Storage outbox:** files queued in `storage_deletions` aren't removed until the Phase 6 worker exists.
+- **Published-page deletes:** the database allows them so retention purges work. The API blocks authors
+  from changing a page once any linked edition is published (or the deadline has passed). Photo delete
+  stays allowed.
 - **Slur test cases:** the fixture uses a marker token. Real examples for live moderation tests belong in
   an untracked, gated file.
 
@@ -243,8 +245,8 @@ None right now.
   serverless instance has its own.
 - **Panels wait for the image**, so the generate, rewrite, avatar and panel routes set `maxDuration = 60`.
   Check that the Vercel plan allows that duration.
-- **The `events` table still has the old per-highlight columns** (headline, article, panel). Phase 4
-  migrates it to highlights and adds page, page-paper, story, panel, reaction and saved-edition tables.
+- **Horoscopes are written on the first read of a week** for each sign on the paper, then reused.
+  Birthdays are included (month-day only) when they fall in the edition week.
 - **Browser coordinates reach our server** for weather. They're rounded and never stored or logged, but
   they do leave the browser. The web app also sends exact coordinates to BigDataCloud for reverse
   geocoding today; that should go (see the frontend change list).

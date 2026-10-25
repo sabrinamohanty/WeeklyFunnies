@@ -1,4 +1,7 @@
 import { routes } from "@/lib/contract/routes";
-import { notImplemented } from "@/lib/http/handler";
+import { defineRoute } from "@/lib/http/handler";
+import { publishEdition } from "@/lib/editions/repo";
 
-export const POST = notImplemented(routes.publishEdition);
+export const POST = defineRoute(routes.publishEdition, async ({ user, params }) => ({
+  data: { edition: await publishEdition(params.editionId, user.id) },
+}));

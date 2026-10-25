@@ -1,13 +1,15 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { type TestUser, createUser, deleteUsers, inDays, serviceClient } from "./helpers/db";
+import { type TestUser, createUser, deleteUsers, serviceClient } from "./helpers/db";
 import {
   type World,
   addPhoto,
   buildWorld,
   createEdition,
-  createEvent,
+  createHighlight,
+  createPage,
   createPaper,
+  linkPage,
   removeObjects,
 } from "./helpers/world";
 
@@ -66,33 +68,27 @@ describe("profiles", () => {
 });
 
 describe("published editions are locked", () => {
-  it("rejects new events", async () => {
-    const { error } = await db()
-      .from("events")
-      .insert({
-        edition_id: w.publishedA,
-        paper_id: w.paperA,
-        user_id: w.ama.id,
-        source_text: "late",
-        headline: "late",
-        article: "late",
-        position: 1,
-        expires_at: inDays(30),
-      });
-    expect(error?.message).toContain("edition_locked");
+  it("rejects new highlights on a published page", async () => {
+    await expect(createHighlight(w.amaPublishedPage, w.ama, 1)).rejects.toThrow(/edition_locked/);
   });
 
   it("rejects content edits, but still lets a panel finish", async () => {
-    const edit = await db().from("events").update({ headline: "changed" }).eq("id", w.amaPublishedEvent);
+    const edit = await db().from("highlights").update({ text: "changed" }).eq("id", w.amaPublishedHighlight);
     expect(edit.error?.message).toContain("edition_locked");
-    const unapprove = await db().from("events").update({ approved: false }).eq("id", w.amaPublishedEvent);
-    expect(unapprove.error?.message).toContain("edition_locked");
-    const panel = await db().from("events").update({ panel_status: "ready" }).eq("id", w.amaPublishedEvent);
+    const story = await db().from("stories").update({ headline: "changed" }).eq("id", w.amaPublishedStory);
+    expect(story.error?.message).toContain("edition_locked");
+    const page = await db().from("pages").update({ comic_title: "nope" }).eq("id", w.amaPublishedPage);
+    expect(page.error?.message).toContain("edition_locked");
+    const panel = await db()
+      .from("panels")
+      .update({ status: "ready" })
+      .eq("page_id", w.amaPublishedPage)
+      .eq("idx", 0);
     expect(panel.error).toBeNull();
   });
 
   it("rejects new photos", async () => {
-    await expect(addPhoto(w.amaPublishedEvent, w.paperA, w.ama, 1)).rejects.toThrow(/edition_locked/);
+    await expect(addPhoto(w.amaPublishedHighlight, w.ama, 1)).rejects.toThrow(/edition_locked/);
   });
 
   it("can't be unpublished", async () => {
@@ -102,47 +98,52 @@ describe("published editions are locked", () => {
       .eq("id", w.publishedA);
     expect(error?.message).toContain("edition_locked");
   });
+
+  it("rejects linking a new page to a published edition", async () => {
+    const page = await createPage(w.cole, "2026-10-12");
+    await expect(linkPage(page, w.cole, w.paperA, w.publishedA)).rejects.toThrow(/edition_locked/);
+    await db().from("pages").delete().eq("id", page);
+  });
 });
 
 describe("limits and ownership", () => {
-  it("caps highlights at 3 per person per edition", async () => {
-    await createEvent(w.draftA, w.paperA, w.cole, 1);
-    await createEvent(w.draftA, w.paperA, w.cole, 2);
-    await expect(createEvent(w.draftA, w.paperA, w.cole, 3)).rejects.toThrow(/check constraint/);
-    await expect(createEvent(w.draftA, w.paperA, w.cole, 0)).rejects.toThrow(
-      /duplicate key|events_position_unique/,
+  it("caps highlights at 3 per page", async () => {
+    await createHighlight(w.coleDraftPage, w.cole, 1);
+    await createHighlight(w.coleDraftPage, w.cole, 2);
+    await expect(createHighlight(w.coleDraftPage, w.cole, 3)).rejects.toThrow(/check constraint/);
+    await expect(createHighlight(w.coleDraftPage, w.cole, 0)).rejects.toThrow(
+      /duplicate key|highlights_.*position/,
     );
   });
 
-  it("caps photos at 4 per event", async () => {
-    const event = await createEvent(w.draftB, w.paperB, w.ben, 1);
+  it("caps photos at 4 per highlight", async () => {
     const added = [];
-    for (const position of [0, 1, 2, 3]) added.push(await addPhoto(event, w.paperB, w.ben, position));
-    await expect(addPhoto(event, w.paperB, w.ben, 4)).rejects.toThrow(/check constraint/);
+    for (const position of [1, 2, 3]) added.push(await addPhoto(w.benDraftHighlight, w.ben, position));
+    await expect(addPhoto(w.benDraftHighlight, w.ben, 4)).rejects.toThrow(/check constraint/);
     await removeObjects({ photos: added.map((p) => p.path) });
   });
 
-  it("rejects events by non-members (Ben posting into paper A)", async () => {
-    await expect(createEvent(w.draftA, w.paperA, w.ben, 0)).rejects.toThrow(/foreign key/);
+  it("rejects page links by non-members (Ben posting into paper A)", async () => {
+    await expect(linkPage(w.benDraftPage, w.ben, w.paperA, w.draftA)).rejects.toThrow(/foreign key/);
   });
 
-  it("rejects events whose paper doesn't match the edition", async () => {
-    await expect(createEvent(w.draftA, w.paperB, w.ben, 0)).rejects.toThrow(/foreign key/);
+  it("rejects page links whose paper doesn't match the edition", async () => {
+    const page = await createPage(w.ben, "2026-09-21");
+    await expect(linkPage(page, w.ben, w.paperB, w.draftA)).rejects.toThrow(/foreign key/);
+    await db().from("pages").delete().eq("id", page);
   });
 
   it("rejects photo paths outside the author's folder", async () => {
     const { error } = await db()
       .from("photos")
       .insert({
-        event_id: w.amaDraftEvent,
-        paper_id: w.paperA,
+        highlight_id: w.amaDraftHighlight,
         user_id: w.ama.id,
-        storage_path: `${w.paperB}/${w.ben.id}/${randomUUID()}.png`,
+        storage_path: `${w.ben.id}/${randomUUID()}.png`,
         width: 1,
         height: 1,
         byte_size: 1,
         position: 2,
-        expires_at: inDays(1),
       });
     expect(error?.code).toBe("23514");
   });
@@ -168,13 +169,22 @@ describe("limits and ownership", () => {
 });
 
 describe("storage deletion outbox", () => {
-  it("queues panel and photo files when an event is deleted", async () => {
-    const event = await createEvent(w.draftB, w.paperB, w.ben, 2);
-    const photo = await addPhoto(event, w.paperB, w.ben, 0);
-    const panel = `${w.paperB}/${w.ben.id}/${randomUUID()}.png`;
-    await db().from("events").update({ panel_path: panel }).eq("id", event);
+  it("queues panel and photo files when a page is deleted", async () => {
+    const page = await createPage(w.ben, "2026-10-05");
+    const highlight = await createHighlight(page, w.ben);
+    const photo = await addPhoto(highlight, w.ben, 0);
+    const panel = `${w.ben.id}/${randomUUID()}.png`;
+    await db().from("panels").insert({
+      page_id: page,
+      idx: 0,
+      user_id: w.ben.id,
+      highlight_id: highlight,
+      scene: "A quiet panel.",
+      storage_path: panel,
+      status: "ready",
+    });
 
-    await db().from("events").delete().eq("id", event);
+    await db().from("pages").delete().eq("id", page);
     const { data } = await db()
       .from("storage_deletions")
       .select("bucket, path")
@@ -188,11 +198,21 @@ describe("storage deletion outbox", () => {
   });
 
   it("is idempotent: queuing the same path twice keeps one entry", async () => {
-    const path = `${w.paperB}/${w.ben.id}/${randomUUID()}.png`;
-    const event = await createEvent(w.draftB, w.paperB, w.ben, 2, { panel_path: path });
-    await db().from("events").update({ panel_path: null }).eq("id", event);
-    await db().from("events").update({ panel_path: path }).eq("id", event);
-    await db().from("events").delete().eq("id", event);
+    const path = `${w.ben.id}/${randomUUID()}.png`;
+    const page = await createPage(w.ben, "2026-09-28");
+    const highlight = await createHighlight(page, w.ben);
+    await db().from("panels").insert({
+      page_id: page,
+      idx: 0,
+      user_id: w.ben.id,
+      highlight_id: highlight,
+      scene: "A quiet panel.",
+      storage_path: path,
+      status: "ready",
+    });
+    await db().from("panels").update({ storage_path: null }).eq("page_id", page).eq("idx", 0);
+    await db().from("panels").update({ storage_path: path }).eq("page_id", page).eq("idx", 0);
+    await db().from("pages").delete().eq("id", page);
     const { data } = await db().from("storage_deletions").select("path").eq("path", path);
     expect(data).toHaveLength(1);
     await removeObjects({ panels: [path] });

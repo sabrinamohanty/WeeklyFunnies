@@ -16,6 +16,10 @@ export async function call(
     token?: string;
     body?: unknown;
     rawBody?: string;
+    multipart?: {
+      fields?: Record<string, string>;
+      file?: { field: string; filename: string; type: string; bytes: Uint8Array };
+    };
     params?: Record<string, string>;
     ip?: string;
   },
@@ -24,8 +28,32 @@ export async function call(
     "x-real-ip": opts.ip ?? `10.0.${(ipCounter >> 8) & 255}.${ipCounter++ & 255}`,
   };
   if (opts.token) headers.authorization = `Bearer ${opts.token}`;
-  let body: string | undefined;
-  if (opts.rawBody !== undefined || opts.body !== undefined) {
+  let body: string | Uint8Array | undefined;
+  if (opts.multipart) {
+    const boundary = "----vitestboundary";
+    const chunks: Uint8Array[] = [];
+    const push = (s: string) => chunks.push(new TextEncoder().encode(s));
+    for (const [name, value] of Object.entries(opts.multipart.fields ?? {})) {
+      push(`--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${value}\r\n`);
+    }
+    if (opts.multipart.file) {
+      const f = opts.multipart.file;
+      push(
+        `--${boundary}\r\nContent-Disposition: form-data; name="${f.field}"; filename="${f.filename}"\r\nContent-Type: ${f.type}\r\n\r\n`,
+      );
+      chunks.push(f.bytes);
+      push(`\r\n`);
+    }
+    push(`--${boundary}--\r\n`);
+    const bytes = new Uint8Array(chunks.reduce((n, c) => n + c.length, 0));
+    let off = 0;
+    for (const c of chunks) {
+      bytes.set(c, off);
+      off += c.length;
+    }
+    headers["content-type"] = `multipart/form-data; boundary=${boundary}`;
+    body = bytes;
+  } else if (opts.rawBody !== undefined || opts.body !== undefined) {
     headers["content-type"] = "application/json";
     body = opts.rawBody ?? JSON.stringify(opts.body);
   }

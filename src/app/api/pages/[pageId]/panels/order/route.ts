@@ -1,4 +1,7 @@
 import { routes } from "@/lib/contract/routes";
-import { notImplemented } from "@/lib/http/handler";
+import { defineRoute } from "@/lib/http/handler";
+import { reorderPanels } from "@/lib/pages/generate";
 
-export const PUT = notImplemented(routes.reorderPanels);
+export const PUT = defineRoute(routes.reorderPanels, async ({ user, params, body }) => ({
+  data: { page: await reorderPanels(params.pageId, user.id, body.order) },
+}));

@@ -15,8 +15,9 @@ import {
  * Two papers and three users:
  * - Paper A: Ama (owner) and Cole (member). One draft edition and one published edition.
  * - Paper B: Ben (owner). One draft edition.
- * Ama has an event with a photo and panel in each of paper A's editions, an approved avatar, and an
- * in-progress avatar draft with a retained selfie. Cole has a draft event in paper A.
+ * Ama has a page (with highlight, photo, story, and panel) in each of paper A's editions, an
+ * approved avatar, and an in-progress avatar draft with a retained selfie. Cole has a draft page
+ * in paper A.
  */
 export interface World {
   ama: TestUser;
@@ -27,10 +28,16 @@ export interface World {
   draftA: string;
   publishedA: string;
   draftB: string;
-  amaDraftEvent: string;
-  amaPublishedEvent: string;
-  coleDraftEvent: string;
-  benDraftEvent: string;
+  amaDraftPage: string;
+  amaPublishedPage: string;
+  coleDraftPage: string;
+  benDraftPage: string;
+  amaDraftHighlight: string;
+  amaPublishedHighlight: string;
+  coleDraftHighlight: string;
+  benDraftHighlight: string;
+  amaDraftStory: string;
+  amaPublishedStory: string;
   paths: {
     amaDraftPhoto: string;
     amaPublishedPhoto: string;
@@ -75,31 +82,54 @@ export async function publish(editionId: string): Promise<void> {
   must(
     await db()
       .from("editions")
-      .update({ status: "published", published_at: new Date().toISOString(), expires_at: inDays(30) })
+      .update({ status: "published", published_at: new Date().toISOString(), expires_at: inDays(14) })
       .eq("id", editionId)
       .select(),
   );
 }
 
-export async function createEvent(
-  editionId: string,
+export async function createPage(
+  user: TestUser,
+  weekStart: string,
+  extra: Record<string, unknown> = {},
+): Promise<string> {
+  return must(
+    await db()
+      .from("pages")
+      .insert({ user_id: user.id, week_start: weekStart, ...extra })
+      .select("id")
+      .single(),
+  ).id;
+}
+
+export async function linkPage(
+  pageId: string,
+  user: TestUser,
   paperId: string,
+  editionId: string,
+): Promise<void> {
+  must(
+    await db()
+      .from("page_papers")
+      .insert({ page_id: pageId, user_id: user.id, paper_id: paperId, edition_id: editionId })
+      .select(),
+  );
+}
+
+export async function createHighlight(
+  pageId: string,
   user: TestUser,
   position = 0,
   extra: Record<string, unknown> = {},
 ): Promise<string> {
   return must(
     await db()
-      .from("events")
+      .from("highlights")
       .insert({
-        edition_id: editionId,
-        paper_id: paperId,
+        page_id: pageId,
         user_id: user.id,
-        source_text: "Ran my first 5K",
-        headline: "Local runner finishes 5K",
-        article: "It happened. It was great.",
+        text: "Ran my first 5K",
         position,
-        expires_at: inDays(30),
         ...extra,
       })
       .select("id")
@@ -107,36 +137,68 @@ export async function createEvent(
   ).id;
 }
 
-export async function addPanel(eventId: string, paperId: string, user: TestUser): Promise<string> {
-  const path = `${paperId}/${user.id}/${randomUUID()}.png`;
+export async function createStory(pageId: string, highlightId: string, user: TestUser): Promise<string> {
+  return must(
+    await db()
+      .from("stories")
+      .insert({
+        page_id: pageId,
+        highlight_id: highlightId,
+        user_id: user.id,
+        section: "news",
+        headline: "Local runner finishes 5K",
+        body: "It happened. It was great.",
+      })
+      .select("id")
+      .single(),
+  ).id;
+}
+
+export async function addPanel(
+  pageId: string,
+  highlightId: string,
+  user: TestUser,
+  idx = 0,
+): Promise<string> {
+  const path = `${user.id}/${randomUUID()}.png`;
   await upload("panels", path);
   must(
-    await db().from("events").update({ panel_path: path, panel_status: "ready" }).eq("id", eventId).select(),
+    await db()
+      .from("panels")
+      .insert({
+        page_id: pageId,
+        idx,
+        user_id: user.id,
+        highlight_id: highlightId,
+        scene: "Ama crosses the finish line.",
+        caption: "Done!",
+        dialogue: [{ text: "What a week!", side: "left" }],
+        storage_path: path,
+        status: "ready",
+      })
+      .select(),
   );
   return path;
 }
 
 export async function addPhoto(
-  eventId: string,
-  paperId: string,
+  highlightId: string,
   user: TestUser,
   position = 0,
 ): Promise<{ id: string; path: string }> {
-  const path = `${paperId}/${user.id}/${randomUUID()}.png`;
+  const path = `${user.id}/${randomUUID()}.png`;
   await upload("photos", path);
   const row = must(
     await db()
       .from("photos")
       .insert({
-        event_id: eventId,
-        paper_id: paperId,
+        highlight_id: highlightId,
         user_id: user.id,
         storage_path: path,
         width: 1,
         height: 1,
         byte_size: 68,
         position,
-        expires_at: inDays(30),
       })
       .select("id")
       .single(),
@@ -144,7 +206,7 @@ export async function addPhoto(
   return { id: row.id, path };
 }
 
-/** Test cleanup: removes files and their outbox entries directly (the real purge worker is Phase 6). */
+/** Removes files this test uploaded, and the outbox rows the delete triggers queued. */
 export async function removeObjects(byBucket: Record<string, string[]>): Promise<void> {
   for (const [bucket, paths] of Object.entries(byBucket)) {
     if (paths.length === 0) continue;
@@ -164,16 +226,35 @@ export async function buildWorld(): Promise<World> {
   const publishedA = await createEdition(paperA, PREVIOUS_MONDAY);
   const draftB = await createEdition(paperB, MONDAY);
 
-  const amaDraftEvent = await createEvent(draftA, paperA, ama);
-  const amaPublishedEvent = await createEvent(publishedA, paperA, ama, 0, { approved: true });
-  const coleDraftEvent = await createEvent(draftA, paperA, cole);
-  const benDraftEvent = await createEvent(draftB, paperB, ben);
+  const now = new Date().toISOString();
+  const amaDraftPage = await createPage(ama, MONDAY);
+  const amaPublishedPage = await createPage(ama, PREVIOUS_MONDAY, {
+    status: "approved",
+    generated_at: now,
+    approved_at: now,
+    comic_title: "Meanwhile, last week",
+  });
+  const coleDraftPage = await createPage(cole, MONDAY);
+  const benDraftPage = await createPage(ben, MONDAY);
 
-  const amaDraftPhoto = await addPhoto(amaDraftEvent, paperA, ama);
-  const amaPublishedPhoto = await addPhoto(amaPublishedEvent, paperA, ama);
-  const benPhoto = await addPhoto(benDraftEvent, paperB, ben);
-  const amaDraftPanel = await addPanel(amaDraftEvent, paperA, ama);
-  const amaPublishedPanel = await addPanel(amaPublishedEvent, paperA, ama);
+  await linkPage(amaDraftPage, ama, paperA, draftA);
+  await linkPage(amaPublishedPage, ama, paperA, publishedA);
+  await linkPage(coleDraftPage, cole, paperA, draftA);
+  await linkPage(benDraftPage, ben, paperB, draftB);
+
+  const amaDraftHighlight = await createHighlight(amaDraftPage, ama);
+  const amaPublishedHighlight = await createHighlight(amaPublishedPage, ama);
+  const coleDraftHighlight = await createHighlight(coleDraftPage, cole);
+  const benDraftHighlight = await createHighlight(benDraftPage, ben);
+
+  const amaDraftStory = await createStory(amaDraftPage, amaDraftHighlight, ama);
+  const amaPublishedStory = await createStory(amaPublishedPage, amaPublishedHighlight, ama);
+
+  const amaDraftPhoto = await addPhoto(amaDraftHighlight, ama);
+  const amaPublishedPhoto = await addPhoto(amaPublishedHighlight, ama);
+  const benPhoto = await addPhoto(benDraftHighlight, ben);
+  const amaDraftPanel = await addPanel(amaDraftPage, amaDraftHighlight, ama);
+  const amaPublishedPanel = await addPanel(amaPublishedPage, amaPublishedHighlight, ama);
   await publish(publishedA);
 
   const amaAvatar = `${ama.id}/${randomUUID()}.png`;
@@ -215,10 +296,16 @@ export async function buildWorld(): Promise<World> {
     draftA,
     publishedA,
     draftB,
-    amaDraftEvent,
-    amaPublishedEvent,
-    coleDraftEvent,
-    benDraftEvent,
+    amaDraftPage,
+    amaPublishedPage,
+    coleDraftPage,
+    benDraftPage,
+    amaDraftHighlight,
+    amaPublishedHighlight,
+    coleDraftHighlight,
+    benDraftHighlight,
+    amaDraftStory,
+    amaPublishedStory,
     paths: {
       amaDraftPhoto: amaDraftPhoto.path,
       amaPublishedPhoto: amaPublishedPhoto.path,
