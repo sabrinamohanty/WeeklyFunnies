@@ -206,7 +206,7 @@ export async function addPhoto(
   return { id: row.id, path };
 }
 
-/** Test cleanup: removes files and their outbox entries directly (the real purge worker is Phase 6). */
+/** Removes files this test uploaded, and the outbox rows the delete triggers queued. */
 export async function removeObjects(byBucket: Record<string, string[]>): Promise<void> {
   for (const [bucket, paths] of Object.entries(byBucket)) {
     if (paths.length === 0) continue;

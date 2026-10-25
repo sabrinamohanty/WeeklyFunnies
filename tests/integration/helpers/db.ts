@@ -27,6 +27,7 @@ export function clientWithToken(token: string): SupabaseClient {
 export interface TestUser {
   id: string;
   email: string;
+  password: string;
   token: string;
   client: SupabaseClient;
 }
@@ -41,7 +42,7 @@ export async function createUser(label: string): Promise<TestUser> {
   const signIn = await anonClient().auth.signInWithPassword({ email, password });
   if (signIn.error || !signIn.data.session) throw signIn.error ?? new Error("signIn failed");
   const token = signIn.data.session.access_token;
-  return { id: data.user.id, email, token, client: clientWithToken(token) };
+  return { id: data.user.id, email, password, token, client: clientWithToken(token) };
 }
 
 export async function deleteUsers(users: TestUser[]): Promise<void> {

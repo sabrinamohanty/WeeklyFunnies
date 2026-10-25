@@ -18,7 +18,7 @@ interfaces described below.
 | 3     | AI layer and safety behind the stub provider, aligned with the web app                  | Done        | `phase-2-3` |
 | 4     | Core routes and data: pages, highlights, photos, avatars, panels, editions, reactions   | Done        | `phase-4-5` |
 | 5     | Non-AI content: weather, birthdays, horoscopes                                          | Done        | `phase-4-5` |
-| 6     | Retention: sliding expiry, logout purge, cleanup cron                                   | Not started | `phase-6-7` |
+| 6     | Retention: sliding expiry, logout purge, cleanup cron                                   | Done        | `phase-4-5` |
 | 7     | Seed data for the frontend, end-to-end check with the web app, docs                     | Not started | `phase-6-7` |
 | 8     | Real AI providers (Anthropic for text, Meta Muse Image for images), live smoke tests    | Not started | `phase-8`   |
 
@@ -29,18 +29,21 @@ built yet return `501 not_implemented`.
 
 - **Phase 4: core routes and data.** Done on `phase-4-5`. Weekly pages linked to papers; highlights,
   stories, panels, reactions, and saved editions; uploads re-encoded with metadata stripped; generate,
-  rewrite, draw, approve, publish (owner, after the deadline), save, and reactions. Horoscopes and
-  weather stay for Phase 5.
+  rewrite, draw, approve, publish (owner, after the deadline), save, and reactions.
 - **Phase 5: non-AI content.** Done on `phase-4-5`. `GET /api/weather` reads Open-Meteo for the browser's
   location or the profile city. Coordinates are rounded to about 10 km before the request and are never
   stored or logged. Birthdays for the edition week were already in the bundle. Horoscopes are written once
   per sign per Monday, through the AI layer (the stub in development), with a fallback line. The lucky
   number is still computed on the server. A draft edition includes them, so the stars page does not wait
   for Sunday's publish.
-- **Phase 6: retention.** The 30-day sliding window for drafts, deleting published editions after 14 days
-  unless saved, `POST /api/session/logout` (sign out everywhere,
-  hide drafts, purge after 24 hours), the cleanup cron that deletes rows and files together, avatar photo
-  expiry, and rate-limit pruning. Tests for all of it.
+- **Phase 6: retention.** Done on `phase-4-5`. `POST /api/session/logout` revokes every session, then
+  records when drafts may be deleted (24 hours later). The old token stops working, which is what hides
+  those drafts. Signing back in clears that clock. A signed-in request refreshes `last_active_at` at most
+  once an hour, and drafts are deleted after 30 days of silence. Published editions past `expires_at` are
+  deleted unless they were saved. A past page that no paper still links is deleted with its photos and
+  panels. Selfies past `selfie_expires_at` are cleared and their files removed. `GET /api/internal/cleanup`
+  does that work, drains `storage_deletions`, and calls `rate_limit_prune`. The profile, look, and approved
+  avatar stay. The web app calls logout before it clears the session on this device.
 - **Phase 7: seed data and frontend check.** A re-runnable seed with a few fake friends, placeholder
   avatars and one published edition; a run-through with the web app (CORS, auth, the page and panel
   flow); docs brought up to date.
@@ -102,6 +105,16 @@ Tests: `frontend/src/lib/inflight.test.ts` checks that two overlapping calls for
 The edition bundle stores signs in lowercase (`libra`). The stars page compared that to the title-case sign from the birthday (`Libra`), so a horoscope the server had written never replaced the sample line, and the lucky number stayed the day of the month.
 
 The page now matches signs without regard to case, and shows the edition's text and lucky number when that row exists. `frontend/src/screens/read.test.tsx` covers a `libra` row on a Libra birthday. `frontend/src/weather.test.ts` checks that a forecast dated Saturday night in Chicago still shows Saturday the 24th as today, instead of shifting the calendar date. `tests/unit/weather.test.ts` checks rounding, a skipped bad day, and that the Open-Meteo request receives `30.3,-97.7` rather than the precise point. The edition integration test checks that reading a draft writes one shared Libra horoscope and that a published earlier week gets its own. The frontend suite is 70 tests.
+
+### Retention setup tripped two database checks
+
+The cleanup tests set a profile's timezone to UTC on its own, and they inserted a page link onto an edition that was already published. Both writes were rejected.
+
+`profiles_city_complete` requires the city name, latitude, longitude, and timezone to be all set or all empty. A timezone with no city is not a valid profile. The tests leave the timezone empty. With no timezone stored, the current page uses UTC, and the test pages are created for that same Monday.
+
+`page_papers_draft_only` raises `edition_locked` when a page is linked to an edition that is already published. The page has to be linked while the edition is still a draft. The test then publishes it, either as a saved edition (`saved_at` set, `expires_at` empty) or as an expired one (`expires_at` in the past).
+
+`tests/integration/api-retention.test.ts` covers both outcomes. An idle author's saved edition and its page stay, and that author's other draft is deleted. An expired edition is deleted, and so is the past page that was its only copy. The same file checks logout, signing back in, the 24-hour grace, the 30-day window, selfie expiry, the storage outbox, and rate-limit pruning.
 
 ## Contract notes for the frontend
 

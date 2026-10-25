@@ -10,7 +10,7 @@
 | 3. AI placeholder layer and safety | Done        |
 | 4. Core routes and data            | Done        |
 | 5. Weather, birthdays, horoscopes  | Done        |
-| 6. Retention                       | Not started |
+| 6. Retention                       | Done        |
 | 7. Seed data and frontend check    | Not started |
 | 8. Real AI providers               | Not started |
 
@@ -188,6 +188,9 @@ What app roles can do directly (defense in depth; the app is meant to go through
     saved the edition (kept forever, for every member);
   - the avatar is part of the profile and is kept;
   - the selfie is kept until avatar approval, 1 hour at most.
+  - `GET /api/internal/cleanup` (cron secret) deletes those rows, drains `storage_deletions`, and prunes
+    rate-limit windows older than an hour. The web app calls `POST /api/session/logout` before the local
+    sign-out.
 - **Papers:** a user can be in several papers. Weeks start Monday in the owner's timezone and close at
   the deadline, Sunday 11:59 p.m. in that timezone. Each member approves their own page; the owner
   publishes manually after the deadline.
@@ -221,8 +224,6 @@ None right now.
 
 - **Cron frequency:** Vercel Hobby runs crons at most once a day. The jobs sweep wants every minute, so it
   needs Vercel Pro, or Supabase `pg_cron` with `pg_net` calling the internal route.
-- **Rate-limit pruning:** `rate_limit_prune()` exists but isn't scheduled yet. The cron sweep should call
-  it (Phase 6).
 - **Rate limiter fails open:** a Postgres outage disables rate limits rather than blocking all traffic.
   The IP and per-user limits come back as soon as the database does.
 - **Auth round trip:** each request calls Supabase Auth to check the session. That's what makes sign-out
@@ -230,7 +231,6 @@ None right now.
 - **Published-page deletes:** the database allows them so retention purges work. The API blocks authors
   from changing a page once any linked edition is published (or the deadline has passed). Photo delete
   stays allowed.
-- **Storage outbox:** files queued in `storage_deletions` aren't removed until the Phase 6 worker exists.
 - **Slur test cases:** the fixture uses a marker token. Real examples for live moderation tests belong in
   an untracked, gated file.
 

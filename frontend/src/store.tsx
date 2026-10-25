@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 import type { Session } from '@supabase/supabase-js'
 import { api } from './lib/api'
 import { supabase } from './lib/auth'
+import { endSession } from './lib/session'
 import { appendUnsavedHighlights, parseLocalDraft, reconcileHighlights } from './lib/page-flow'
 import { cityLabel, isUuid, PAGE_LIMITS, type ApiPage, type EditionBundle, type Profile, type StyleKey } from './lib/types'
 import { moodCycle, swatchCycle, type Mood, type Paper, type Swatch } from './data'
@@ -317,7 +318,7 @@ export function StoreProvider({ children, initial }: { children: ReactNode; init
   }, [])
 
   const signOut = useCallback(async () => {
-    await supabase.auth.signOut()
+    await endSession(() => api.logout(), () => supabase.auth.signOut())
     try { localStorage.removeItem(LOCAL_KEY) } catch { /* */ }
     setState({ ...defaultState(readTheme()), ready: true })
   }, [])

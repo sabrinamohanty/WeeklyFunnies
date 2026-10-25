@@ -72,6 +72,10 @@ export const api = {
     request<{ profile: Profile }>('/api/me', { method: 'PATCH', body: JSON.stringify(body) }),
   geocode: (q: string) =>
     request<{ results: CityCandidate[] }>(`/api/geocode?q=${encodeURIComponent(q)}`),
+  logout: () => request<{ signedOut: true; purgeAfter: string }>('/api/session/logout', {
+    method: 'POST',
+    body: '{}',
+  }),
   weather: (coords?: { lat: string; lon: string }) => {
     const q = coords ? `?lat=${encodeURIComponent(coords.lat)}&lon=${encodeURIComponent(coords.lon)}` : ''
     return request<{ weather: WeatherReport | null }>(`/api/weather${q}`)
